@@ -201,7 +201,6 @@ export async function classifyChatMessage(
       prompt: `Message: ${message}`,
       responseMimeType: 'application/json',
       responseSchema: CLASSIFIER_SCHEMA,
-      skipCache: true,
     });
 
     if (res.usedFallback) {

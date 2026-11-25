@@ -275,3 +275,58 @@ test('caches identical requests (role, AQI band, language, question) for 5 minut
   assert.equal(expired.cached, false);
   assert.equal(invokeCount, 3);
 });
+
+test('coalesces concurrent identical requests and logs handled 429 retries via info instead of stderr', async () => {
+  const infoLogs: string[] = [];
+  const warnLogs: string[] = [];
+  const errorLogs: string[] = [];
+  let invokeCount = 0;
+
+  const runner = createGeminiFallbackRunner({
+    env: {
+      GEMINI_API_KEY: 'test-key-value',
+      GEMINI_MODELS: 'model-a,model-b',
+    },
+    logger: {
+      info: (msg: string) => infoLogs.push(msg),
+      warn: (msg: string) => warnLogs.push(msg),
+      error: (msg: string) => errorLogs.push(msg),
+    },
+    invokeModel: async ({ model }) => {
+      invokeCount += 1;
+      if (model === 'model-a') {
+        const err = new Error('429 quota exceeded') as Error & { status: number };
+        err.status = 429;
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return '1. Wear an N95 mask on busy roads.';
+    },
+  });
+
+  const req = {
+    feature: 'advice' as const,
+    role: 'delivery',
+    aqiBand: 'Moderate',
+    hoursOutside: 8,
+    language: 'en' as const,
+    question: 'advice:delivery:Moderate:8',
+    systemInstruction: 'sys',
+    prompt: 'prompt',
+  };
+
+  const [first, second] = await Promise.all([
+    runner.execute(req),
+    runner.execute(req),
+  ]);
+
+  assert.equal(first.model, 'model-b');
+  assert.equal(second.model, 'model-b');
+  assert.equal(first.answer, second.answer);
+  // 1 call to model-a (429) + 1 call to model-b (success) shared across both callers
+  assert.equal(invokeCount, 2);
+  assert.equal(infoLogs.length, 1);
+  assert.equal(warnLogs.length, 0);
+  assert.equal(errorLogs.length, 0);
+});
+

@@ -210,6 +210,12 @@ interface CacheEntry {
   expiresAt: number;
 }
 
+export interface FallbackLogger {
+  info?: (message: string) => void;
+  warn: (message: string) => void;
+  error: (message: string) => void;
+}
+
 export interface FallbackRunnerDependencies {
   env?: Record<string, string | undefined>;
   now?: () => number;
@@ -217,7 +223,7 @@ export interface FallbackRunnerDependencies {
   cooldownMs?: number;
   cacheTtlMs?: number;
   invokeModel?: ModelInvoker;
-  logger?: Pick<Console, 'warn' | 'error'>;
+  logger?: FallbackLogger;
 }
 
 function buildCacheKey(req: FallbackRequest): string {
@@ -307,12 +313,26 @@ function createSdkInvoker(apiKey: string): ModelInvoker {
 export function createGeminiFallbackRunner(deps: FallbackRunnerDependencies = {}) {
   const cooldownUntilByModel = new Map<string, number>();
   const responseCache = new Map<string, CacheEntry>();
+  const inFlightRequests = new Map<string, Promise<FallbackResponse>>();
 
   const nowFn = deps.now ?? (() => Date.now());
   const timeoutMs = deps.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const cooldownMs = deps.cooldownMs ?? COOLDOWN_MS;
   const cacheTtlMs = deps.cacheTtlMs ?? CACHE_TTL_MS;
   const logger = deps.logger ?? console;
+  const logRetryNotice = (msg: string, debugEnabled: boolean) => {
+    if (deps.logger) {
+      if (typeof deps.logger.info === 'function') {
+        deps.logger.info(msg);
+      } else {
+        deps.logger.warn(msg);
+      }
+      return;
+    }
+    if (debugEnabled) {
+      console.log(msg);
+    }
+  };
 
   let cachedClientKey: string | undefined;
   let cachedSdkInvoker: ModelInvoker | undefined;
@@ -369,6 +389,15 @@ export function createGeminiFallbackRunner(deps: FallbackRunnerDependencies = {}
         }
         responseCache.delete(cacheKey);
       }
+
+      const pending = inFlightRequests.get(cacheKey);
+      if (pending) {
+        const sharedResult = await pending;
+        return {
+          ...sharedResult,
+          cached: !sharedResult.usedFallback,
+        };
+      }
     }
 
     const apiKey = env.GEMINI_API_KEY;
@@ -402,106 +431,120 @@ export function createGeminiFallbackRunner(deps: FallbackRunnerDependencies = {}
       invoker = cachedSdkInvoker;
     }
 
-    const models = getConfiguredModels(env);
-    const attempts: AttemptRecord[] = [];
+    const runModels = async (): Promise<FallbackResponse> => {
+      const models = getConfiguredModels(env);
+      const attempts: AttemptRecord[] = [];
 
-    for (const model of models) {
-      const cooldownUntil = cooldownUntilByModel.get(model);
-      if (cooldownUntil !== undefined && now < cooldownUntil) {
-        attempts.push({
-          model,
-          outcome: 'skipped_cooldown',
-          reason: 'Cooling down after 429',
-        });
-        continue;
-      }
-      if (cooldownUntil !== undefined && now >= cooldownUntil) {
-        cooldownUntilByModel.delete(model);
-      }
-
-      try {
-        const answer = await callWithTimeout(invoker, {
-          model,
-          systemInstruction: req.systemInstruction,
-          prompt: req.prompt,
-          image: req.image,
-          responseMimeType: req.responseMimeType,
-          responseSchema: req.responseSchema,
-        });
-
-        attempts.push({ model, outcome: 'success' });
-
-        if (!req.skipCache) {
-          responseCache.set(cacheKey, {
-            answer,
-            model,
-            expiresAt: now + cacheTtlMs,
-          });
-        }
-
-        return {
-          answer,
-          model,
-          usedFallback: false,
-          cached: false,
-          attempts,
-        };
-      } catch (err) {
-        const classified = classifyGeminiError(err, apiKey);
-
-        if (classified.kind === 'non_retryable') {
+      for (const model of models) {
+        const currentNow = nowFn();
+        const cooldownUntil = cooldownUntilByModel.get(model);
+        if (cooldownUntil !== undefined && currentNow < cooldownUntil) {
           attempts.push({
             model,
-            outcome: 'fatal_error',
+            outcome: 'skipped_cooldown',
+            reason: 'Cooling down after 429',
+          });
+          continue;
+        }
+        if (cooldownUntil !== undefined && currentNow >= cooldownUntil) {
+          cooldownUntilByModel.delete(model);
+        }
+
+        try {
+          const answer = await callWithTimeout(invoker!, {
+            model,
+            systemInstruction: req.systemInstruction,
+            prompt: req.prompt,
+            image: req.image,
+            responseMimeType: req.responseMimeType,
+            responseSchema: req.responseSchema,
+          });
+
+          attempts.push({ model, outcome: 'success' });
+
+          if (!req.skipCache) {
+            responseCache.set(cacheKey, {
+              answer,
+              model,
+              expiresAt: nowFn() + cacheTtlMs,
+            });
+          }
+
+          return {
+            answer,
+            model,
+            usedFallback: false,
+            cached: false,
+            attempts,
+          };
+        } catch (err) {
+          const classified = classifyGeminiError(err, apiKey);
+
+          if (classified.kind === 'non_retryable') {
+            attempts.push({
+              model,
+              outcome: 'fatal_error',
+              reason: classified.reason,
+            });
+            logger.error(
+              `[Gemini] Non-retryable error on ${model} (${classified.statusCode}): ${classified.reason}`
+            );
+            throw new GeminiClientError(
+              classified.statusCode === 401 || classified.statusCode === 403
+                ? 'AI service rejected the API credentials. Check GEMINI_API_KEY configuration.'
+                : `Invalid AI request (${classified.statusCode}): ${classified.reason}`,
+              classified.statusCode,
+              classified.statusCode === 401 || classified.statusCode === 403
+                ? 'INVALID_API_KEY'
+                : 'BAD_REQUEST'
+            );
+          }
+
+          if (classified.statusCode === 429) {
+            cooldownUntilByModel.set(model, nowFn() + cooldownMs);
+          }
+
+          attempts.push({
+            model,
+            outcome: 'retryable_error',
             reason: classified.reason,
           });
-          logger.error(
-            `[Gemini] Non-retryable error on ${model} (${classified.statusCode}): ${classified.reason}`
-          );
-          throw new GeminiClientError(
-            classified.statusCode === 401 || classified.statusCode === 403
-              ? 'AI service rejected the API credentials. Check GEMINI_API_KEY configuration.'
-              : `Invalid AI request (${classified.statusCode}): ${classified.reason}`,
-            classified.statusCode,
-            classified.statusCode === 401 || classified.statusCode === 403
-              ? 'INVALID_API_KEY'
-              : 'BAD_REQUEST'
+          logRetryNotice(
+            `[Gemini] ${model} failed (${classified.reason}); trying next fallback model.`,
+            env.DEBUG_GEMINI_FALLBACK === '1'
           );
         }
-
-        if (classified.statusCode === 429) {
-          cooldownUntilByModel.set(model, now + cooldownMs);
-        }
-
-        attempts.push({
-          model,
-          outcome: 'retryable_error',
-          reason: classified.reason,
-        });
-        logger.warn(
-          `[Gemini] ${model} failed (${classified.reason}); trying next fallback model.`
-        );
       }
+
+      // All models failed or were cooling down -> rule-based fallback
+      return {
+        answer: buildRuleBasedAnswer({
+          feature: req.feature,
+          role: req.role,
+          aqiBand: req.aqiBand,
+          aqi: req.aqi,
+          hoursOutside: req.hoursOutside,
+          mainPollutant: req.mainPollutant,
+          language: req.language,
+          question: req.question,
+          hourly24: req.hourly24,
+        }),
+        model: 'rule-based-fallback',
+        usedFallback: true,
+        cached: false,
+        attempts,
+      };
+    };
+
+    if (req.skipCache) {
+      return runModels();
     }
 
-    // All models failed or were cooling down -> rule-based fallback
-    return {
-      answer: buildRuleBasedAnswer({
-        feature: req.feature,
-        role: req.role,
-        aqiBand: req.aqiBand,
-        aqi: req.aqi,
-        hoursOutside: req.hoursOutside,
-        mainPollutant: req.mainPollutant,
-        language: req.language,
-        question: req.question,
-        hourly24: req.hourly24,
-      }),
-      model: 'rule-based-fallback',
-      usedFallback: true,
-      cached: false,
-      attempts,
-    };
+    const promise = runModels().finally(() => {
+      inFlightRequests.delete(cacheKey);
+    });
+    inFlightRequests.set(cacheKey, promise);
+    return promise;
   }
 
   return {
