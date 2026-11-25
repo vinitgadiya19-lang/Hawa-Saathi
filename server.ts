@@ -16,6 +16,30 @@ import type {
   HourlyForecastInput,
   SupportedLanguage,
 } from './server/ruleBasedFallback.ts';
+import {
+  generateFamilyPlanWithFallback,
+  type FamilyPlanLanguage,
+} from './server/familyPlan.ts';
+import {
+  calculateFamilyImpact,
+  computeCombinedImpactAfterSteps,
+  MAX_DAYS_PER_WEEK,
+  MAX_DISTANCE_KM,
+  MAX_FAMILY_MEMBERS,
+  sanitizeFreeText,
+  validateMembersList,
+  validateTripInput,
+  type FamilyMember,
+  type FamilyTrip,
+  type HomeDetails,
+} from './src/services/familyPlanCalc.ts';
+import {
+  COOKING_FUEL_FACTORS,
+  type AgeGroupId,
+  type CookingFuelId,
+  type HealthNoteId,
+} from './src/config/emissionFactors.ts';
+import type { HourlyAirQualityPoint } from './src/types/airQuality.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -364,6 +388,193 @@ export function createApp() {
         ...result,
         answer: formatCoachReply(result.answer),
       });
+    } catch (err) {
+      handleApiError(res, err);
+    }
+  });
+
+  // 5. Family Plan (strict JSON Low-Emission Steps + 3-sentence summary)
+  app.post('/api/family-plan', async (req: Request, res: Response) => {
+    try {
+      const body = req.body;
+      if (!body || typeof body !== 'object') {
+        throw new GeminiClientError(
+          'Request body must be a JSON object.',
+          400,
+          'BAD_REQUEST'
+        );
+      }
+      const data = body as Record<string, unknown>;
+
+      const rawLang = typeof data.language === 'string' ? data.language.trim() : 'en';
+      const language: FamilyPlanLanguage =
+        rawLang === 'hi' || rawLang === 'mr' ? rawLang : 'en';
+
+      const cityName =
+        sanitizeFreeText(data.cityName, 100) || 'Current city';
+      const aqiBand =
+        sanitizeFreeText(data.aqiBand, 60) || 'Moderate';
+      const liveAqi =
+        typeof data.liveAqi === 'number' && Number.isFinite(data.liveAqi)
+          ? Math.max(0, Math.min(1000, Math.round(data.liveAqi)))
+          : null;
+
+      if (!Array.isArray(data.members) || data.members.length === 0) {
+        throw new GeminiClientError(
+          'Add at least 1 family member.',
+          400,
+          'BAD_REQUEST'
+        );
+      }
+      if (data.members.length > MAX_FAMILY_MEMBERS) {
+        throw new GeminiClientError(
+          `At most ${MAX_FAMILY_MEMBERS} family members allowed.`,
+          400,
+          'BAD_REQUEST'
+        );
+      }
+
+      const rawMembers: FamilyMember[] = data.members.map((item, idx) => {
+        const rec =
+          item && typeof item === 'object'
+            ? (item as Record<string, unknown>)
+            : {};
+        return {
+          id: sanitizeFreeText(rec.id, 40) || `m-${idx + 1}`,
+          name: sanitizeFreeText(rec.name, 100) || `Member ${idx + 1}`,
+          ageGroup: (typeof rec.ageGroup === 'string'
+            ? rec.ageGroup
+            : 'adult') as AgeGroupId,
+          healthNote: (typeof rec.healthNote === 'string'
+            ? rec.healthNote
+            : 'none') as HealthNoteId,
+        };
+      });
+      const members = validateMembersList(rawMembers);
+
+      if (!Array.isArray(data.trips) || data.trips.length === 0) {
+        throw new GeminiClientError(
+          'Add at least 1 daily journey before generating steps.',
+          400,
+          'BAD_REQUEST'
+        );
+      }
+      if (data.trips.length > 30) {
+        throw new GeminiClientError(
+          'Maximum 30 trips allowed per plan.',
+          400,
+          'BAD_REQUEST'
+        );
+      }
+
+      const trips: FamilyTrip[] = data.trips.map((item, idx) => {
+        const rec =
+          item && typeof item === 'object'
+            ? (item as Record<string, unknown>)
+            : {};
+        const checked = validateTripInput({
+          from: rec.from,
+          to: rec.to,
+          distanceKm: rec.distanceKm,
+          daysPerWeek: rec.daysPerWeek,
+          timeOfDay: rec.timeOfDay,
+          travelMode: rec.travelMode,
+        });
+        if (!checked.valid) {
+          throw new GeminiClientError(
+            `Trip ${idx + 1}: ${checked.errors.join(' ')} (distance 0–${MAX_DISTANCE_KM} km, days 0–${MAX_DAYS_PER_WEEK})`,
+            400,
+            'BAD_REQUEST'
+          );
+        }
+        const memberId = sanitizeFreeText(rec.memberId, 40) || members[0].id;
+        return {
+          id: sanitizeFreeText(rec.id, 40) || `t-${idx + 1}`,
+          memberId,
+          ...checked.sanitized,
+        };
+      });
+
+      const rawHome =
+        data.home && typeof data.home === 'object'
+          ? (data.home as Record<string, unknown>)
+          : {};
+      const rawFuel =
+        typeof rawHome.cookingFuel === 'string' ? rawHome.cookingFuel : 'lpg';
+      const cookingFuel: CookingFuelId = Object.prototype.hasOwnProperty.call(
+        COOKING_FUEL_FACTORS,
+        rawFuel
+      )
+        ? (rawFuel as CookingFuelId)
+        : 'lpg';
+
+      const home: HomeDetails = {
+        cookingFuel,
+        hasChimneyOrExhaust: Boolean(rawHome.hasChimneyOrExhaust),
+        usesAirPurifier: Boolean(rawHome.usesAirPurifier),
+        windowsFacingMainRoad: Boolean(rawHome.windowsFacingMainRoad),
+        smokesOrIncenseIndoors: Boolean(rawHome.smokesOrIncenseIndoors),
+      };
+
+      const rawHourly = Array.isArray(data.hourly24) ? data.hourly24 : [];
+      const hourly24: HourlyAirQualityPoint[] = rawHourly
+        .slice(0, 24)
+        .filter(
+          (item): item is Record<string, unknown> =>
+            Boolean(item && typeof item === 'object')
+        )
+        .map((item) => ({
+          time: typeof item.time === 'string' ? item.time.slice(0, 40) : '',
+          hourLabel:
+            typeof item.hourLabel === 'string'
+              ? item.hourLabel.slice(0, 20)
+              : 'Hour',
+          us_aqi:
+            typeof item.us_aqi === 'number' && Number.isFinite(item.us_aqi)
+              ? Math.round(item.us_aqi)
+              : null,
+          pm2_5: null,
+          pm10: null,
+          nitrogen_dioxide: null,
+          ozone: null,
+          carbon_monoxide: null,
+        }));
+
+      const summary = calculateFamilyImpact({
+        members,
+        trips,
+        home,
+        hourly24,
+        liveAqi,
+      });
+
+      const selectedScenarioIds = Array.isArray(data.selectedScenarioIds)
+        ? data.selectedScenarioIds.filter(
+            (id): id is string => typeof id === 'string'
+          )
+        : [];
+      const selectedScenarios =
+        selectedScenarioIds.length > 0
+          ? summary.scenarios.filter((sc) => selectedScenarioIds.includes(sc.id))
+          : summary.scenarios.filter((sc) => sc.applicable);
+
+      const afterMetrics = computeCombinedImpactAfterSteps(
+        summary,
+        selectedScenarios
+      );
+
+      const result = await generateFamilyPlanWithFallback({
+        language,
+        cityName,
+        aqi: liveAqi,
+        aqiBand,
+        home,
+        summary,
+        afterCo2Kg: afterMetrics.afterCo2Kg,
+        afterExposure: afterMetrics.afterExposure,
+      });
+
+      res.json(result);
     } catch (err) {
       handleApiError(res, err);
     }

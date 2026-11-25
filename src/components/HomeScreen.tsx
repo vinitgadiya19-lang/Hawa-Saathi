@@ -10,6 +10,7 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  Users,
   Wind,
   X,
 } from 'lucide-react';
@@ -33,6 +34,7 @@ import { RoleIllustration, SquiggleUnderline } from './RoleIllustrations';
 import { HourlyBarChart } from './HourlyBarChart';
 import { AiCoachStudio } from './AiCoachStudio';
 import { FormattedCoachReply } from './FormattedCoachReply';
+import { FamilyPlanPage } from './FamilyPlanPage';
 import {
   AiApiResult,
   CoachLanguage,
@@ -110,6 +112,8 @@ export function HomeScreen({
   onChangeRole,
 }: HomeScreenProps) {
   const role = getRoleDefinition(roleId);
+
+  const [activeTab, setActiveTab] = useState<'coach' | 'family'>('coach');
 
   // City search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -346,7 +350,56 @@ export function HomeScreen({
       </header>
 
       <main className="flex-1 py-6 space-y-6">
-        {/* Location Controls Card */}
+        <nav aria-label="App sections">
+          <div
+            role="tablist"
+            aria-label="Choose between Live Coach and Family Plan"
+            className="inline-flex flex-wrap gap-2.5"
+          >
+            <button
+              type="button"
+              role="tab"
+              id="tab-coach"
+              aria-selected={activeTab === 'coach'}
+              aria-controls="panel-coach"
+              onClick={() => setActiveTab('coach')}
+              className={`brutal-btn rounded-2xl px-5 py-3 text-base font-extrabold inline-flex items-center gap-2 min-h-[48px] whitespace-nowrap shrink-0 cursor-pointer ${
+                activeTab === 'coach'
+                  ? 'bg-[#141414] text-[#FFFDF2]'
+                  : 'bg-white text-[#141414] hover:bg-[#FFF3B0]'
+              }`}
+            >
+              <Wind className="w-5 h-5 shrink-0" aria-hidden="true" />
+              <span>Live Coach</span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              id="tab-family"
+              aria-selected={activeTab === 'family'}
+              aria-controls="panel-family"
+              onClick={() => setActiveTab('family')}
+              className={`brutal-btn rounded-2xl px-5 py-3 text-base font-extrabold inline-flex items-center gap-2 min-h-[48px] whitespace-nowrap shrink-0 cursor-pointer ${
+                activeTab === 'family'
+                  ? 'bg-[#141414] text-[#FFFDF2]'
+                  : 'bg-[#EAD6FF] text-[#141414] hover:bg-[#FFD23F]'
+              }`}
+            >
+              <Users className="w-5 h-5 shrink-0" aria-hidden="true" />
+              <span>Family Plan</span>
+            </button>
+          </div>
+        </nav>
+
+        {activeTab === 'coach' ? (
+          <div
+            id="panel-coach"
+            role="tabpanel"
+            aria-labelledby="tab-coach"
+            className="space-y-6"
+          >
+            {/* Location Controls Card */}
         <section
           aria-label="Choose location for live air quality"
           className="brutal-card bg-white rounded-3xl p-4 sm:p-6"
@@ -845,6 +898,29 @@ export function HomeScreen({
               language={language}
               onChangeLanguage={onChangeLanguage}
               onModelAnswered={onModelAnswered}
+            />
+          </div>
+        )}
+          </div>
+        ) : (
+          <div
+            id="panel-family"
+            role="tabpanel"
+            aria-labelledby="tab-family"
+          >
+            <FamilyPlanPage
+              location={location}
+              liveAqi={airData?.us_aqi ?? null}
+              aqiBandLabel={band?.label ?? 'Moderate'}
+              hourly24={airData?.hourly24 ?? []}
+              defaultLanguage={language}
+              onModelAnswered={onModelAnswered}
+              onGoToLocationSetup={() => {
+                setActiveTab('coach');
+                setTimeout(() => {
+                  document.getElementById('city-search-input')?.focus();
+                }, 60);
+              }}
             />
           </div>
         )}
