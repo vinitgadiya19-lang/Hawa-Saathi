@@ -1,31 +1,32 @@
-# Hawa Saathi
+# Hawa Saathi: Outdoor Air Quality Coach
 
-A mobile-first outdoor air quality coach built for delivery riders, cab/auto drivers, street vendors, traffic police, and everyday citizens.
+**Live app:** https://hawa-saathi-4ey3.vercel.app/
+
+Most air quality apps say "stay indoors". That doesn't help delivery riders, cab and auto drivers, street vendors or traffic police, who must work outside. Hawa Saathi gives them simple, role-specific guidance based on live air quality.
 
 ## Features
+- **Role-based advice:** choose Delivery Rider, Cab/Auto Driver, Street Vendor, Traffic Police or General, and get short, practical steps.
+- **Live AQI:** use GPS or search any city. Data comes from Open-Meteo (US AQI, main pollutant, 24-hour forecast).
+- **AI chatbot:** answers air quality questions in simple steps, in English, Hindi and Marathi, using the user's role and current AQI.
 
-- **Role-Based Guidance**: Remembers your outdoor work role and tailors mask, break, and route tips based on hours spent outside.
-- **Live Air Quality & 24h Forecast**: Uses browser GPS or city search via the free Open-Meteo Air Quality & Geocoding APIs (`us_aqi`, PM2.5, PM10, NO₂, O₃, CO, and next-24-hour chart). Shows honest error states instead of placeholder numbers.
-- **AI Coach & Floating Chat**: Role-aware advice, 24-hour shift planning, mask/street photo audits, and a floating chat widget in English, Hindi, and Hinglish.
-- **Model Fallback & Safety Guards**: Server-side `/api/*` routes automatically fall back across `GEMINI_MODELS` (with 429 cooldowns, 5-minute caching, and rule-based fallback) and enforce two-layer topic/medical/emergency guards on chat.
+## How Gemini is used
+- The chatbot and advice run on the server through the Gemini API with a strict system prompt.
+- A pre-check classifies each message (on-topic, off-topic, medical, emergency, injection attempt) before any answer is generated.
+- Automatic fallback across several Gemini models if one hits its quota, then a rule-based answer if all fail.
 
-## Setup & Commands
+## Tech
+React + TypeScript, Node server routes, Gemini API, Open-Meteo.
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Configure `.env` (see `.env.example`):
-   - `GEMINI_API_KEY`: Server-side Gemini API key (optional—falls back to built-in rule-based advice if unavailable).
-   - `GEMINI_MODELS`: Optional comma-separated fallback model list.
-3. Run locally on port `3000`:
-   ```bash
-   npm run dev
-   ```
-4. Run tests, typecheck, or production build:
-   ```bash
-   npm test
-   npm run lint
-   npm run build
-   npm start
-   ```
+## Setup
+1. Clone the repo and run `npm install`.
+2. Set environment variables: `GEMINI_API_KEY` and `GEMINI_MODELS` (comma-separated model list).
+3. Run `npm run dev`. Run tests with `npm test`.
+
+
+## Safety and limitations
+- Guidance only, not medical advice. The bot never diagnoses or suggests medicines, and tells users to seek medical help for emergencies.
+- AQI values are modelled regional estimates and may differ from a specific street.
+- Usage depends on API quotas.
+
+## Challenge
+Built for Google PromptWars, Challenge 6: Urban Air Quality Assistant.
