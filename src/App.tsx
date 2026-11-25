@@ -123,7 +123,18 @@ export default function App() {
   };
 
   const handleLiveAirContextChange = useCallback((ctx: LiveChatAirContext) => {
-    setLiveAirContext(ctx);
+    setLiveAirContext((prev) =>
+      prev.aqi === ctx.aqi &&
+      prev.aqiBandLabel === ctx.aqiBandLabel &&
+      prev.mainPollutantSymbol === ctx.mainPollutantSymbol &&
+      prev.locationName === ctx.locationName
+        ? prev
+        : ctx
+    );
+  }, []);
+
+  const handleOpenRoleSelector = useCallback(() => {
+    setScreen('role');
   }, []);
 
   const activeRoleForChat: WorkerRoleId = selectedRole ?? 'general';
@@ -148,7 +159,7 @@ export default function App() {
           onModelAnswered={setAnsweredByModel}
           onLiveAirContextChange={handleLiveAirContextChange}
           onSelectLocation={handleSelectLocation}
-          onChangeRole={() => setScreen('role')}
+          onChangeRole={handleOpenRoleSelector}
         />
       )}
 

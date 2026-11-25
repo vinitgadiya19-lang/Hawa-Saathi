@@ -11,7 +11,7 @@ function HourlyForecastTable({ hourly24 }: { hourly24: HourlyAirQualityPoint[] }
   return (
     <div
       id="hourly-forecast-table"
-      className="mt-4 rounded-2xl border-2 border-[#141414] bg-[#FFFDF8] overflow-x-auto"
+      className="mt-4 rounded-2xl border-2 border-[#141414] bg-[#FFFDF8] overflow-x-auto overflow-y-hidden overscroll-x-contain"
     >
       <table className="w-full text-left text-xs sm:text-sm border-collapse">
         <caption className="sr-only">
@@ -70,7 +70,7 @@ export function HourlyBarChart({ hourly24 }: HourlyBarChartProps) {
 
   if (hourly24.length === 0) {
     return (
-      <div className="brutal-card bg-white rounded-2xl p-5 text-center">
+      <div className="brutal-card bg-white rounded-2xl p-5 min-h-[120px] flex items-center justify-center text-center">
         <p className="text-base font-bold text-[#141414]">Live 24-hour forecast unavailable</p>
       </div>
     );
@@ -91,19 +91,19 @@ export function HourlyBarChart({ hourly24 }: HourlyBarChartProps) {
       e.preventDefault();
       const next = Math.min(hourly24.length - 1, index + 1);
       setSelectedIndex(next);
-      barRefs.current[next]?.focus();
+      barRefs.current[next]?.focus({ preventScroll: true });
     } else if (e.key === 'ArrowLeft') {
       e.preventDefault();
       const prev = Math.max(0, index - 1);
       setSelectedIndex(prev);
-      barRefs.current[prev]?.focus();
+      barRefs.current[prev]?.focus({ preventScroll: true });
     }
   };
 
   return (
     <section
       aria-labelledby="hourly-chart-heading"
-      className="brutal-card bg-white rounded-3xl p-4 sm:p-6"
+      className="brutal-card bg-white rounded-3xl p-4 sm:p-6 min-h-[372px]"
     >
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div>
@@ -122,11 +122,11 @@ export function HourlyBarChart({ hourly24 }: HourlyBarChartProps) {
         <div className="flex flex-wrap items-center gap-2.5">
           <div
             aria-live="polite"
-            className={`rounded-xl border-2 border-[#141414] px-3.5 py-2 flex items-center gap-3 ${
+            className={`anchor-none rounded-xl border-2 border-[#141414] px-3.5 py-2 flex items-center gap-3 w-full sm:w-[244px] min-h-[68px] ${
               selectedBand ? selectedBand.bgClass : 'bg-[#FFFDF2]'
             } ${selectedBand ? selectedBand.textColorClass : 'text-[#141414]'}`}
           >
-            <div>
+            <div className="shrink-0">
               <div className="text-xs font-bold uppercase tracking-wide opacity-90">
                 {selectedPoint.hourLabel}
               </div>
@@ -136,10 +136,10 @@ export function HourlyBarChart({ hourly24 }: HourlyBarChartProps) {
                   : 'No data'}
               </div>
             </div>
-            <div className="h-8 w-[2px] bg-current opacity-25" aria-hidden="true" />
-            <div className="text-xs sm:text-sm font-bold leading-tight">
-              <div>{selectedBand ? selectedBand.label : 'Unavailable'}</div>
-              <div className="font-mono font-semibold opacity-90 tabular-nums">
+            <div className="h-8 w-[2px] bg-current opacity-25 shrink-0" aria-hidden="true" />
+            <div className="text-xs sm:text-sm font-bold leading-tight min-w-0">
+              <div className="truncate">{selectedBand ? selectedBand.label : 'Unavailable'}</div>
+              <div className="font-mono font-semibold opacity-90 tabular-nums whitespace-nowrap">
                 {typeof selectedPoint.pm2_5 === 'number'
                   ? `PM2.5: ${selectedPoint.pm2_5.toFixed(1)} µg/m³`
                   : 'PM2.5: —'}
@@ -152,7 +152,7 @@ export function HourlyBarChart({ hourly24 }: HourlyBarChartProps) {
             onClick={() => setShowDataTable((prev) => !prev)}
             aria-expanded={showDataTable}
             aria-controls="hourly-forecast-table"
-            className="brutal-btn bg-[#FFFDF2] text-[#141414] hover:bg-[#FFF3B0] font-bold text-xs sm:text-sm px-3.5 py-2 rounded-xl inline-flex items-center gap-1.5 min-h-[44px] cursor-pointer"
+            className="brutal-btn bg-[#FFFDF2] text-[#141414] hover:bg-[#FFF3B0] font-bold text-xs sm:text-sm px-3.5 py-2 rounded-xl inline-flex items-center gap-1.5 min-h-[44px] whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Table className="w-4 h-4 shrink-0" aria-hidden="true" />
             <span>{showDataTable ? 'Hide data table' : 'Show data table'}</span>
@@ -160,7 +160,8 @@ export function HourlyBarChart({ hourly24 }: HourlyBarChartProps) {
         </div>
       </div>
 
-      <div className="relative rounded-2xl border-2 border-[#141414] bg-[#FFFDF8] p-3 sm:p-4 overflow-x-auto">
+      {/* Single horizontal scroll axis; overflow-y-hidden prevents nested vertical scrollbars */}
+      <div className="relative rounded-2xl border-2 border-[#141414] bg-[#FFFDF8] p-3 sm:p-4 overflow-x-auto overflow-y-hidden overscroll-x-contain">
         <div className="min-w-[520px]">
           <div className="relative h-48 sm:h-56 flex items-end gap-1 sm:gap-1.5 pt-6 pb-1">
             <div
@@ -207,8 +208,8 @@ export function HourlyBarChart({ hourly24 }: HourlyBarChartProps) {
                     }}
                     className={`w-full min-w-[16px] rounded-t-md border-2 border-[#141414] transition-transform cursor-pointer focus-visible:z-20 ${
                       isSelected
-                        ? 'ring-2 ring-[#141414] ring-offset-2 ring-offset-[#FFFDF8] -translate-y-1 shadow-[0_3px_0_#141414]'
-                        : 'hover:-translate-y-0.5'
+                        ? 'ring-2 ring-[#141414] ring-offset-2 ring-offset-[#FFFDF8] shadow-[0_3px_0_#141414]'
+                        : ''
                     }`}
                   />
                 </div>

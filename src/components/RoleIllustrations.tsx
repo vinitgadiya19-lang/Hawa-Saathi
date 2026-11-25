@@ -4,6 +4,8 @@ export function SquiggleUnderline({ className = '' }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 180 16"
+      width="180"
+      height="16"
       fill="none"
       aria-hidden="true"
       className={className}
@@ -21,7 +23,7 @@ export function SquiggleUnderline({ className = '' }: { className?: string }) {
 
 function DeliveryIllustration({ className }: { className: string }) {
   return (
-    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" className={className}>
+    <svg viewBox="0 0 64 64" width="64" height="64" fill="none" aria-hidden="true" className={className}>
       <rect x="10" y="22" width="16" height="18" rx="3" fill="#FF5C35" stroke="#141414" strokeWidth="2.5" />
       <path
         d="M27 21C27 14.3726 32.3726 9 39 9C45.6274 9 51 14.3726 51 21V25H27V21Z"
@@ -49,7 +51,7 @@ function DeliveryIllustration({ className }: { className: string }) {
 
 function DriverIllustration({ className }: { className: string }) {
   return (
-    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" className={className}>
+    <svg viewBox="0 0 64 64" width="64" height="64" fill="none" aria-hidden="true" className={className}>
       <path
         d="M14 26C14 17.1634 21.1634 10 30 10H38C45.732 10 52 16.268 52 24V42H12V28C12 26.8954 12.8954 26 14 26Z"
         fill="#FFD23F"
@@ -71,7 +73,7 @@ function DriverIllustration({ className }: { className: string }) {
 
 function VendorIllustration({ className }: { className: string }) {
   return (
-    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" className={className}>
+    <svg viewBox="0 0 64 64" width="64" height="64" fill="none" aria-hidden="true" className={className}>
       <path d="M10 22L16 11H48L54 22H10Z" fill="#FF4D8D" stroke="#141414" strokeWidth="2.5" strokeLinejoin="round" />
       <path
         d="M10 22C10 25.5 15 27 17.5 22C20 27 25 27 27.5 22C30 27 34 27 36.5 22C39 27 44 27 46.5 22C49 27 54 25.5 54 22"
@@ -94,7 +96,7 @@ function VendorIllustration({ className }: { className: string }) {
 
 function PoliceIllustration({ className }: { className: string }) {
   return (
-    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" className={className}>
+    <svg viewBox="0 0 64 64" width="64" height="64" fill="none" aria-hidden="true" className={className}>
       <path d="M14 23L19 11H45L50 23H14Z" fill="#2563EB" stroke="#141414" strokeWidth="2.5" strokeLinejoin="round" />
       <path d="M13 23H51C51 27 44 29 32 29C20 29 13 27 13 23Z" fill="#141414" />
       <circle cx="32" cy="17" r="3.5" fill="#FFD23F" stroke="#141414" strokeWidth="2" />
@@ -114,7 +116,7 @@ function PoliceIllustration({ className }: { className: string }) {
 
 function GeneralIllustration({ className }: { className: string }) {
   return (
-    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" className={className}>
+    <svg viewBox="0 0 64 64" width="64" height="64" fill="none" aria-hidden="true" className={className}>
       <circle cx="44" cy="18" r="8" fill="#FFD23F" stroke="#141414" strokeWidth="2.5" />
       <circle cx="26" cy="22" r="8" fill="#EAD6FF" stroke="#141414" strokeWidth="2.5" />
       <path

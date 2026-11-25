@@ -20,7 +20,7 @@ export function MethodologyPanel() {
         </p>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto overflow-y-hidden overscroll-x-contain">
         <table className="w-full text-left border-collapse min-w-[600px] text-xs sm:text-sm">
           <thead>
             <tr className="border-b-2 border-[#141414] bg-[#FFF3B0] font-extrabold text-[#141414]">

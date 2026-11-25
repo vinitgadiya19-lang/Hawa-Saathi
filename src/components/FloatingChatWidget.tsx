@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { AlertTriangle, MessageSquare, Send, X } from 'lucide-react';
 import { CoachLanguage, fetchAiChat } from '../services/aiCoachApi';
 import { WorkerRoleId } from '../types/airQuality';
@@ -51,6 +51,35 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
   );
 }
 
+// Lock background document scrolling strictly while the floating chat panel is open
+function useBodyScrollLock(isLocked: boolean) {
+  useEffect(() => {
+    if (!isLocked || typeof document === 'undefined') return undefined;
+
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+    const prevBodyPaddingRight = body.style.paddingRight;
+
+    const scrollbarWidth = window.innerWidth - html.clientWidth;
+    const supportsGutter =
+      typeof CSS !== 'undefined' && CSS.supports?.('scrollbar-gutter: stable');
+
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0 && !supportsGutter) {
+      body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    return () => {
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
+      body.style.paddingRight = prevBodyPaddingRight;
+    };
+  }, [isLocked]);
+}
+
 function useChatFocusTrap(
   isOpen: boolean,
   panelRef: RefObject<HTMLDivElement | null>,
@@ -63,12 +92,14 @@ function useChatFocusTrap(
   useEffect(() => {
     if (isOpen) {
       wasOpenRef.current = true;
-      const frame = requestAnimationFrame(() => inputRef.current?.focus());
+      const frame = requestAnimationFrame(() =>
+        inputRef.current?.focus({ preventScroll: true })
+      );
       return () => cancelAnimationFrame(frame);
     }
     if (wasOpenRef.current) {
       wasOpenRef.current = false;
-      launcherRef.current?.focus();
+      launcherRef.current?.focus({ preventScroll: true });
     }
     return undefined;
   }, [isOpen, inputRef, launcherRef]);
@@ -92,13 +123,13 @@ function useChatFocusTrap(
 
       if (!active || !panelRef.current.contains(active)) {
         e.preventDefault();
-        first.focus();
+        first.focus({ preventScroll: true });
       } else if (e.shiftKey && active === first) {
         e.preventDefault();
-        last.focus();
+        last.focus({ preventScroll: true });
       } else if (!e.shiftKey && active === last) {
         e.preventDefault();
-        first.focus();
+        first.focus({ preventScroll: true });
       }
     };
 
@@ -111,17 +142,18 @@ function ChatMessageHistory({
   messages,
   isLoading,
   roleLabel,
-  messagesEndRef,
+  containerRef,
 }: {
   messages: ChatMessage[];
   isLoading: boolean;
   roleLabel: string;
-  messagesEndRef: RefObject<HTMLDivElement | null>;
+  containerRef: RefObject<HTMLDivElement | null>;
 }) {
   return (
     <div
+      ref={containerRef}
       aria-live="polite"
-      className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-3 bg-[#FFFDF8]"
+      className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain p-3.5 space-y-3 bg-[#FFFDF8]"
     >
       {messages.length === 0 && (
         <div className="rounded-2xl border-2 border-[#141414] bg-white p-3.5 text-sm font-semibold text-[#262626]">
@@ -172,8 +204,44 @@ function ChatMessageHistory({
           </div>
         </div>
       )}
+    </div>
+  );
+}
 
-      <div ref={messagesEndRef} />
+function ChatPanelHeader({
+  roleShortLabel,
+  aqi,
+  aqiBandLabel,
+  onClose,
+}: {
+  roleShortLabel: string;
+  aqi?: number;
+  aqiBandLabel: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="shrink-0 bg-[#EAD6FF] border-b-2 border-[#141414] px-4 py-3 flex items-center justify-between gap-2">
+      <div className="min-w-0">
+        <h2
+          id="floating-chat-title"
+          className="font-serif text-lg sm:text-xl font-bold text-[#141414] leading-tight truncate"
+        >
+          Ask Hawa Saathi
+        </h2>
+        <p className="text-xs font-bold text-[#262626] truncate">
+          {roleShortLabel}
+          {typeof aqi === 'number' ? ` · ${aqi} AQI (${aqiBandLabel})` : ''}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close chat"
+        className="brutal-btn shrink-0 bg-[#FFFDF2] text-[#141414] w-11 h-11 rounded-xl flex items-center justify-center cursor-pointer"
+      >
+        <X className="w-5 h-5" aria-hidden="true" />
+      </button>
     </div>
   );
 }
@@ -197,19 +265,26 @@ export function FloatingChatWidget({
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
   const role = getRoleDefinition(roleId);
 
-  useChatFocusTrap(isOpen, panelRef, inputRef, launcherRef, () => setIsOpen(false));
+  const handleClosePanel = useCallback(() => setIsOpen(false), []);
 
-  // Scroll to newest message inside the panel respecting reduced-motion settings
+  useBodyScrollLock(isOpen);
+  useChatFocusTrap(isOpen, panelRef, inputRef, launcherRef, handleClosePanel);
+
+  // Scroll only inside the chat message container (never trigger outer page scroll)
   useEffect(() => {
-    if (isOpen) {
-      const reduced =
-        typeof window !== 'undefined' &&
-        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      messagesEndRef.current?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth' });
+    if (!isOpen || !messagesContainerRef.current) return;
+    const container = messagesContainerRef.current;
+    const reduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (typeof container.scrollTo === 'function') {
+      container.scrollTo({ top: container.scrollHeight, behavior: reduced ? 'auto' : 'smooth' });
+    } else {
+      container.scrollTop = container.scrollHeight;
     }
   }, [messages, isLoading, isOpen]);
 
@@ -286,31 +361,14 @@ export function FloatingChatWidget({
           role="dialog"
           aria-modal="true"
           aria-labelledby="floating-chat-title"
-          className="fixed z-50 inset-x-0 bottom-0 w-full h-[80dvh] max-h-[80vh] sm:inset-x-auto sm:w-[380px] sm:h-[520px] sm:max-h-[calc(100dvh-7rem)] sm:bottom-[calc(max(1rem,env(safe-area-inset-bottom))+72px)] sm:right-[max(1rem,env(safe-area-inset-right))] bg-[#FFFDF2] border-t-2 border-x-2 sm:border-2 border-[#141414] rounded-t-3xl sm:rounded-3xl shadow-[0_-4px_0_#141414] sm:shadow-[4px_4px_0_#141414] flex flex-col overflow-hidden"
+          className="fixed z-50 inset-x-0 bottom-0 w-full h-[80dvh] max-h-[80dvh] sm:inset-x-auto sm:w-[380px] sm:h-[520px] sm:max-h-[calc(100dvh-7rem)] sm:bottom-[calc(max(1rem,env(safe-area-inset-bottom))+72px)] sm:right-[max(1rem,env(safe-area-inset-right))] bg-[#FFFDF2] border-t-2 border-x-2 sm:border-2 border-[#141414] rounded-t-3xl sm:rounded-3xl shadow-[0_-4px_0_#141414] sm:shadow-[4px_4px_0_#141414] flex flex-col overflow-hidden"
         >
-          <div className="shrink-0 bg-[#EAD6FF] border-b-2 border-[#141414] px-4 py-3 flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <h2
-                id="floating-chat-title"
-                className="font-serif text-lg sm:text-xl font-bold text-[#141414] leading-tight truncate"
-              >
-                Ask Hawa Saathi
-              </h2>
-              <p className="text-xs font-bold text-[#262626] truncate">
-                {role.shortLabel}
-                {typeof aqi === 'number' ? ` · ${aqi} AQI (${aqiBandLabel})` : ''}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setIsOpen(false)}
-              aria-label="Close chat"
-              className="brutal-btn shrink-0 bg-[#FFFDF2] text-[#141414] w-11 h-11 rounded-xl flex items-center justify-center cursor-pointer"
-            >
-              <X className="w-5 h-5" aria-hidden="true" />
-            </button>
-          </div>
+          <ChatPanelHeader
+            roleShortLabel={role.shortLabel}
+            aqi={aqi}
+            aqiBandLabel={aqiBandLabel}
+            onClose={() => setIsOpen(false)}
+          />
 
           <div className="sr-only" aria-live="polite" aria-atomic="true">
             {liveAnnouncement}
@@ -320,7 +378,7 @@ export function FloatingChatWidget({
             messages={messages}
             isLoading={isLoading}
             roleLabel={role.label}
-            messagesEndRef={messagesEndRef}
+            containerRef={messagesContainerRef}
           />
 
           <div
@@ -379,7 +437,7 @@ export function FloatingChatWidget({
         aria-label={isOpen ? 'Close chat' : 'Open chat'}
         aria-expanded={isOpen}
         aria-controls="hawa-saathi-chat-panel"
-        className={`brutal-btn fixed z-50 bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] w-[60px] h-[60px] rounded-full bg-[#FFD23F] text-[#141414] items-center justify-center cursor-pointer ${
+        className={`fixed z-50 border-2 border-[#141414] shadow-[3px_3px_0_#141414] bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] w-[60px] h-[60px] rounded-full bg-[#FFD23F] text-[#141414] items-center justify-center cursor-pointer transition-opacity duration-150 ${
           isOpen ? 'hidden sm:flex' : 'flex'
         }`}
       >

@@ -1,4 +1,4 @@
-import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeftRight,
@@ -21,12 +21,8 @@ import {
   RoleDefinition,
   WorkerRoleId,
 } from '../types/airQuality';
-import { fetchAirQuality } from '../services/openMeteo';
 import {
-  getAqiBand,
-  getMainPollutant,
   getPollutantDetails,
-  getRoleCoaching,
   getRoleDefinition,
   type RoleCoachingResult,
 } from '../utils/aqi';
@@ -34,16 +30,15 @@ import { RoleIllustration, SquiggleUnderline } from './RoleIllustrations';
 import { HourlyBarChart } from './HourlyBarChart';
 import { FormattedCoachReply } from './FormattedCoachReply';
 import { LocationSearchCard } from './LocationSearchCard';
-import { AiApiResult, CoachLanguage, fetchAiAdvice } from '../services/aiCoachApi';
+import { AiApiResult, CoachLanguage } from '../services/aiCoachApi';
+import {
+  type LiveChatAirContext,
+  useLiveCoachState,
+} from '../hooks/useLiveCoachState';
+
+export type { LiveChatAirContext };
 
 const LazyFamilyPlanPage = React.lazy(() => import('./FamilyPlanPage'));
-
-export interface LiveChatAirContext {
-  aqi?: number;
-  aqiBandLabel: string;
-  mainPollutantSymbol?: string;
-  locationName?: string;
-}
 
 interface HomeScreenProps {
   roleId: WorkerRoleId;
@@ -125,7 +120,7 @@ function PollutantsSection({
           return (
             <div
               key={key}
-              className={`brutal-card-sm rounded-2xl p-4 flex flex-col justify-between ${
+              className={`brutal-card-sm rounded-2xl p-4 min-h-[126px] flex flex-col justify-between ${
                 isMain ? 'bg-[#FFF3B0]' : 'bg-white'
               }`}
             >
@@ -163,6 +158,8 @@ function RoleCoachCard({
   coaching,
   isLoadingAdvice,
   adviceError,
+  isAutoRetryPending,
+  onRetryAdvice,
   adviceResult,
   hoursOutside,
   onChangeHoursOutside,
@@ -174,25 +171,39 @@ function RoleCoachCard({
   coaching: RoleCoachingResult;
   isLoadingAdvice: boolean;
   adviceError: string | null;
+  isAutoRetryPending: boolean;
+  onRetryAdvice: () => void;
   adviceResult: AiApiResult | null;
   hoursOutside: number;
   onChangeHoursOutside: (hrs: number) => void;
   language: CoachLanguage;
   onChangeLanguage: (lang: CoachLanguage) => void;
 }) {
+  const showRuleBasedTips = !adviceResult || adviceResult.usedFallback;
+
   return (
     <section
       aria-labelledby="coach-heading"
-      className="lg:col-span-5 brutal-card bg-[#EAD6FF] text-[#141414] rounded-3xl p-5 sm:p-7 flex flex-col justify-between"
+      className="lg:col-span-5 brutal-card bg-[#EAD6FF] text-[#141414] rounded-3xl p-5 sm:p-7 min-h-[460px] sm:min-h-[480px] flex flex-col justify-between"
     >
       <div>
         <div className="flex items-center gap-3.5 pb-4 border-b-2 border-[#141414]/20">
           <div className="w-14 h-14 rounded-xl bg-[#FFFDF2] border-2 border-[#141414] flex items-center justify-center shrink-0">
             <RoleIllustration roleId={roleId} className="w-11 h-11" />
           </div>
-          <div>
-            <div className="text-xs font-extrabold uppercase tracking-wider text-[#3F3F46]">
-              Coach for {roleLabel}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-[#3F3F46]">
+                Coach for {roleLabel}
+              </span>
+              {isLoadingAdvice && (
+                <span
+                  aria-live="polite"
+                  className="inline-flex items-center gap-1 rounded-md border border-[#141414] bg-[#FFF3B0] px-2 py-0.5 text-[11px] font-extrabold text-[#141414]"
+                >
+                  {adviceResult ? 'Updating...' : 'Personalizing...'}
+                </span>
+              )}
             </div>
             <h2
               id="coach-heading"
@@ -203,50 +214,63 @@ function RoleCoachCard({
           </div>
         </div>
 
-        {isLoadingAdvice && (
-          <p className="mt-4 text-sm font-bold text-[#3F3F46]" aria-live="polite">
-            Personalizing advice for your shift...
-          </p>
-        )}
-
-        {adviceError && !isLoadingAdvice && (
-          <div
-            role="alert"
-            className="mt-4 rounded-xl border-2 border-[#141414] bg-[#FFE0EA] px-3.5 py-2.5 text-sm font-bold text-[#141414]"
-          >
-            {adviceError}
-          </div>
-        )}
-
-        {adviceResult && !isLoadingAdvice && (
-          <div className="mt-4 rounded-2xl border-2 border-[#141414] bg-[#FFFDF2] p-4 space-y-2.5">
-            {adviceResult.usedFallback && (
-              <div className="inline-flex items-center rounded-lg border-2 border-[#141414] bg-[#FFD23F] px-2.5 py-1 text-xs font-extrabold text-[#141414]">
-                Basic answer (AI unavailable)
+        <div className="mt-4 min-h-[220px] anchor-none space-y-3">
+          {adviceError && !isLoadingAdvice && (
+            <div
+              role="alert"
+              className="rounded-xl border-2 border-[#141414] bg-[#FFE0EA] px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-sm font-bold text-[#141414]"
+            >
+              <div>
+                <span>{adviceError}</span>
+                {isAutoRetryPending && (
+                  <span className="block text-xs font-semibold text-[#3F3F46]">
+                    Retrying automatically once in 5 seconds...
+                  </span>
+                )}
               </div>
-            )}
-            <FormattedCoachReply
-              text={adviceResult.answer}
-              className="text-sm sm:text-base font-semibold text-[#141414]"
-            />
-          </div>
-        )}
+              <button
+                type="button"
+                onClick={onRetryAdvice}
+                className="brutal-btn bg-[#FFFDF2] text-[#141414] text-xs font-extrabold px-3 py-1.5 rounded-lg min-h-[36px] shrink-0 cursor-pointer"
+              >
+                Try again
+              </button>
+            </div>
+          )}
 
-        {(!adviceResult || adviceResult.usedFallback) && (
-          <ul className="mt-4 space-y-3">
-            {coaching.tips.map((tip: string, idx: number) => (
-              <li key={idx} className="flex items-start gap-3 text-base font-semibold leading-snug">
-                <span
-                  aria-hidden="true"
-                  className="mt-0.5 w-6 h-6 rounded-full bg-[#141414] text-[#FFFDF2] font-mono text-xs font-bold flex items-center justify-center shrink-0"
+          {adviceResult && (
+            <div className="rounded-2xl border-2 border-[#141414] bg-[#FFFDF2] p-4 space-y-2.5">
+              {adviceResult.usedFallback && (
+                <div className="inline-flex items-center rounded-lg border-2 border-[#141414] bg-[#FFD23F] px-2.5 py-1 text-xs font-extrabold text-[#141414]">
+                  Basic answer (AI unavailable)
+                </div>
+              )}
+              <FormattedCoachReply
+                text={adviceResult.answer}
+                className="text-sm sm:text-base font-semibold text-[#141414]"
+              />
+            </div>
+          )}
+
+          {showRuleBasedTips && (
+            <ul className="space-y-3">
+              {coaching.tips.map((tip: string, idx: number) => (
+                <li
+                  key={idx}
+                  className="flex items-start gap-3 text-base font-semibold leading-snug"
                 >
-                  {idx + 1}
-                </span>
-                <span>{tip}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+                  <span
+                    aria-hidden="true"
+                    className="mt-0.5 w-6 h-6 rounded-full bg-[#141414] text-[#FFFDF2] font-mono text-xs font-bold flex items-center justify-center shrink-0"
+                  >
+                    {idx + 1}
+                  </span>
+                  <span>{tip}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       <div className="mt-5 pt-4 border-t-2 border-[#141414]/15 flex flex-wrap items-center justify-between gap-2">
@@ -331,7 +355,7 @@ function CurrentAqiCard({
   return (
     <section
       aria-labelledby="current-aqi-heading"
-      className={`lg:col-span-7 brutal-card ${band.bgClass} ${band.textColorClass} rounded-3xl p-5 sm:p-7 flex flex-col justify-between`}
+      className={`lg:col-span-7 brutal-card ${band.bgClass} ${band.textColorClass} rounded-3xl p-5 sm:p-7 min-h-[420px] sm:min-h-[448px] flex flex-col justify-between`}
     >
       <div>
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -382,7 +406,7 @@ function CurrentAqiCard({
       </div>
 
       <div className="mt-6 space-y-3">
-        <div className="rounded-2xl border-2 border-[#141414] bg-[#FFFDF2] text-[#141414] p-4">
+        <div className="rounded-2xl border-2 border-[#141414] bg-[#FFFDF2] text-[#141414] p-4 min-h-[108px]">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="text-sm font-extrabold uppercase tracking-wide text-[#3F3F46]">
               Main Pollutant
@@ -482,6 +506,8 @@ function AirQualityStatusView({
   mainPollutant,
   isLoadingAdvice,
   adviceError,
+  isAutoRetryPending,
+  onRetryAdvice,
   adviceResult,
   hoursOutside,
   onChangeHoursOutside,
@@ -501,6 +527,8 @@ function AirQualityStatusView({
   mainPollutant: MainPollutantInfo | null;
   isLoadingAdvice: boolean;
   adviceError: string | null;
+  isAutoRetryPending: boolean;
+  onRetryAdvice: () => void;
   adviceResult: AiApiResult | null;
   hoursOutside: number;
   onChangeHoursOutside: (hrs: number) => void;
@@ -520,22 +548,7 @@ function AirQualityStatusView({
   }
 
   if (isLoadingAir && location) {
-    return (
-      <section
-        aria-live="polite"
-        className="brutal-card bg-[#FFF3B0] rounded-3xl p-6 sm:p-8 flex items-center gap-4"
-      >
-        <RefreshCw className="w-8 h-8 animate-spin text-[#141414] shrink-0" aria-hidden="true" />
-        <div>
-          <h2 className="font-serif text-2xl font-bold text-[#141414]">
-            Checking live air for {location.name}...
-          </h2>
-          <p className="text-base font-semibold text-[#262626] mt-1">
-            Fetching current AQI, pollutants, and 24-hour forecast.
-          </p>
-        </div>
-      </section>
-    );
+    return <AirQualityLoadingSkeleton locationName={location.name} />;
   }
 
   if (!isLoadingAir && airError && location) {
@@ -587,6 +600,8 @@ function AirQualityStatusView({
               coaching={coaching}
               isLoadingAdvice={isLoadingAdvice}
               adviceError={adviceError}
+              isAutoRetryPending={isAutoRetryPending}
+              onRetryAdvice={onRetryAdvice}
               adviceResult={adviceResult}
               hoursOutside={hoursOutside}
               onChangeHoursOutside={onChangeHoursOutside}
@@ -603,6 +618,115 @@ function AirQualityStatusView({
   }
 
   return null;
+}
+
+function AirQualityLoadingSkeleton({ locationName }: { locationName: string }) {
+  return (
+    <div aria-live="polite" className="space-y-6 anchor-none">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        <section className="lg:col-span-7 brutal-card bg-[#FFF3B0] rounded-3xl p-5 sm:p-7 min-h-[420px] sm:min-h-[448px] flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <RefreshCw
+                className="w-6 h-6 animate-spin text-[#141414] shrink-0"
+                aria-hidden="true"
+              />
+              <h2 className="font-serif text-2xl font-bold text-[#141414]">
+                Checking live air for {locationName}...
+              </h2>
+            </div>
+            <p className="text-sm sm:text-base font-semibold text-[#262626] mt-2">
+              Fetching current AQI, pollutants, and 24-hour forecast.
+            </p>
+            <div aria-hidden="true" className="mt-6 flex items-end gap-5">
+              <div className="h-20 w-32 rounded-2xl bg-[#141414]/15" />
+              <div className="h-12 w-36 rounded-xl bg-[#141414]/15" />
+            </div>
+          </div>
+          <div
+            aria-hidden="true"
+            className="mt-6 rounded-2xl border-2 border-[#141414]/25 bg-[#FFFDF2]/80 p-4 min-h-[108px] space-y-2.5"
+          >
+            <div className="h-4 w-44 rounded bg-[#141414]/15" />
+            <div className="h-4 w-3/4 rounded bg-[#141414]/15" />
+          </div>
+        </section>
+
+        <section
+          aria-hidden="true"
+          className="lg:col-span-5 brutal-card bg-[#EAD6FF] rounded-3xl p-5 sm:p-7 min-h-[420px] sm:min-h-[448px] flex flex-col justify-between"
+        >
+          <div className="space-y-4">
+            <div className="flex items-center gap-3.5 pb-4 border-b-2 border-[#141414]/15">
+              <div className="w-14 h-14 rounded-xl bg-[#FFFDF2]/80 border-2 border-[#141414]/25 shrink-0" />
+              <div className="flex-1 space-y-2">
+                <div className="h-3.5 w-28 rounded bg-[#141414]/15" />
+                <div className="h-6 w-44 rounded bg-[#141414]/15" />
+              </div>
+            </div>
+            <div className="min-h-[188px] space-y-3">
+              <div className="h-4 w-11/12 rounded bg-[#141414]/15" />
+              <div className="h-4 w-5/6 rounded bg-[#141414]/15" />
+              <div className="h-4 w-4/5 rounded bg-[#141414]/15" />
+              <div className="h-4 w-3/4 rounded bg-[#141414]/15" />
+            </div>
+          </div>
+          <div className="h-12 rounded-2xl bg-[#FFFDF2]/75 border-2 border-[#141414]/20" />
+        </section>
+      </div>
+
+      <div
+        aria-hidden="true"
+        className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4"
+      >
+        {POLLUTANT_ORDER.map((key) => (
+          <div
+            key={key}
+            className="brutal-card-sm rounded-2xl bg-white p-4 min-h-[126px] flex flex-col justify-between"
+          >
+            <div className="space-y-2">
+              <div className="h-5 w-16 rounded bg-[#141414]/15" />
+              <div className="h-3.5 w-24 rounded bg-[#141414]/10" />
+            </div>
+            <div className="h-7 w-14 rounded bg-[#141414]/15" />
+          </div>
+        ))}
+      </div>
+
+      <div
+        aria-hidden="true"
+        className="brutal-card bg-white rounded-3xl p-5 sm:p-7 min-h-[372px] flex flex-col justify-between"
+      >
+        <div className="flex items-center justify-between gap-4">
+          <div className="h-7 w-48 rounded bg-[#141414]/15" />
+          <div className="h-[68px] w-full sm:w-[244px] rounded-2xl bg-[#FFF3B0]" />
+        </div>
+        <div className="h-[196px] rounded-2xl border-2 border-[#141414]/15 bg-[#FFFDF8]" />
+      </div>
+    </div>
+  );
+}
+
+function FamilyPlanSkeleton() {
+  return (
+    <div aria-live="polite" className="space-y-6 anchor-none min-h-[580px]">
+      <div className="brutal-card bg-[#EAD6FF] rounded-3xl p-5 sm:p-7 min-h-[176px] flex items-center gap-4">
+        <RefreshCw className="w-6 h-6 animate-spin text-[#141414] shrink-0" aria-hidden="true" />
+        <p className="text-base font-bold text-[#141414]">Loading Family Plan...</p>
+      </div>
+      <div
+        aria-hidden="true"
+        className="brutal-card bg-white rounded-3xl p-5 sm:p-7 min-h-[360px] space-y-4"
+      >
+        <div className="h-7 w-60 rounded bg-[#141414]/15" />
+        <div className="h-4 w-80 max-w-full rounded bg-[#141414]/10" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+          <div className="h-44 rounded-2xl bg-[#FFFDF8] border-2 border-[#141414]/15" />
+          <div className="h-44 rounded-2xl bg-[#FFFDF8] border-2 border-[#141414]/15" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function HomeHeaderAndTabs({
@@ -679,137 +803,6 @@ function HomeHeaderAndTabs({
   );
 }
 
-function useLiveCoachState({
-  roleId,
-  location,
-  language,
-  hoursOutside,
-  onModelAnswered,
-  onLiveAirContextChange,
-}: {
-  roleId: WorkerRoleId;
-  location: SelectedLocation | null;
-  language: CoachLanguage;
-  hoursOutside: number;
-  onModelAnswered: (model: string) => void;
-  onLiveAirContextChange: (ctx: LiveChatAirContext) => void;
-}) {
-  const [airData, setAirData] = useState<LiveAirQualityData | null>(null);
-  const [isLoadingAir, setIsLoadingAir] = useState(false);
-  const [airError, setAirError] = useState<string | null>(null);
-  const [adviceResult, setAdviceResult] = useState<AiApiResult | null>(null);
-  const [isLoadingAdvice, setIsLoadingAdvice] = useState(false);
-  const [adviceError, setAdviceError] = useState<string | null>(null);
-
-  const abortRef = useRef<AbortController | null>(null);
-  const adviceAbortRef = useRef<AbortController | null>(null);
-
-  const loadAirQuality = useCallback(async (loc: SelectedLocation) => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    setIsLoadingAir(true);
-    setAirError(null);
-    setAirData(null);
-
-    try {
-      const data = await fetchAirQuality(loc.latitude, loc.longitude, controller.signal);
-      if (!controller.signal.aborted) {
-        setAirData(data);
-        setIsLoadingAir(false);
-      }
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      const message =
-        err instanceof Error && err.message ? err.message : 'Could not reach air quality service.';
-      setAirError(message);
-      setAirData(null);
-      setIsLoadingAir(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (location) {
-      void loadAirQuality(location);
-    }
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, [location, loadAirQuality]);
-
-  const band = airData ? getAqiBand(airData.us_aqi) : null;
-  const mainPollutant = airData ? getMainPollutant(airData.pollutants) : null;
-  const coaching = airData
-    ? getRoleCoaching(roleId, airData.us_aqi, mainPollutant, airData.hourly24)
-    : null;
-
-  useEffect(() => {
-    onLiveAirContextChange({
-      aqi: airData?.us_aqi,
-      aqiBandLabel: band?.label ?? 'Moderate',
-      mainPollutantSymbol: mainPollutant?.symbol,
-      locationName: location?.name,
-    });
-  }, [airData?.us_aqi, band?.label, mainPollutant?.symbol, location?.name, onLiveAirContextChange]);
-
-  useEffect(() => {
-    if (!airData || !band || !location) {
-      setAdviceResult(null);
-      setAdviceError(null);
-      return;
-    }
-
-    adviceAbortRef.current?.abort();
-    const controller = new AbortController();
-    adviceAbortRef.current = controller;
-    setIsLoadingAdvice(true);
-    setAdviceError(null);
-
-    fetchAiAdvice(
-      {
-        role: roleId,
-        aqiBand: band.label,
-        aqi: airData.us_aqi,
-        hoursOutside,
-        mainPollutant: mainPollutant?.symbol,
-        locationName: location.name,
-        language,
-      },
-      controller.signal
-    )
-      .then((res) => {
-        if (controller.signal.aborted) return;
-        setAdviceResult(res);
-        onModelAnswered(res.model);
-        setIsLoadingAdvice(false);
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        setAdviceResult(null);
-        setAdviceError(err instanceof Error ? err.message : 'Unable to load AI advice.');
-        setIsLoadingAdvice(false);
-      });
-
-    return () => {
-      controller.abort();
-    };
-  }, [airData, band, location, roleId, language, hoursOutside, mainPollutant?.symbol, onModelAnswered]);
-
-  return {
-    airData,
-    isLoadingAir,
-    airError,
-    adviceResult,
-    isLoadingAdvice,
-    adviceError,
-    band,
-    mainPollutant,
-    coaching,
-    loadAirQuality,
-  };
-}
-
 export function HomeScreen({
   roleId,
   location,
@@ -832,6 +825,8 @@ export function HomeScreen({
     adviceResult,
     isLoadingAdvice,
     adviceError,
+    isAutoRetryPending,
+    retryAdviceManually,
     band,
     mainPollutant,
     coaching,
@@ -846,7 +841,7 @@ export function HomeScreen({
   });
 
   return (
-    <div className="min-h-screen flex flex-col px-4 py-5 sm:px-8 sm:py-8 max-w-5xl mx-auto">
+    <div className="min-h-dvh flex flex-col px-4 py-5 sm:px-8 sm:py-8 max-w-5xl mx-auto">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-2.5 focus:rounded-xl focus:border-2 focus:border-[#141414] focus:bg-[#FFD23F] focus:text-[#141414] focus:font-extrabold"
@@ -877,6 +872,8 @@ export function HomeScreen({
               mainPollutant={mainPollutant}
               isLoadingAdvice={isLoadingAdvice}
               adviceError={adviceError}
+              isAutoRetryPending={isAutoRetryPending}
+              onRetryAdvice={retryAdviceManually}
               adviceResult={adviceResult}
               hoursOutside={hoursOutside}
               onChangeHoursOutside={onChangeHoursOutside}
@@ -888,17 +885,7 @@ export function HomeScreen({
           </div>
         ) : (
           <div id="panel-family" role="tabpanel" aria-labelledby="tab-family">
-            <Suspense
-              fallback={
-                <div
-                  aria-live="polite"
-                  className="brutal-card bg-[#FFF3B0] rounded-3xl p-6 sm:p-8 flex items-center gap-4"
-                >
-                  <RefreshCw className="w-6 h-6 animate-spin text-[#141414]" aria-hidden="true" />
-                  <p className="text-base font-bold text-[#141414]">Loading Family Plan...</p>
-                </div>
-              }
-            >
+            <Suspense fallback={<FamilyPlanSkeleton />}>
               <LazyFamilyPlanPage
                 location={location}
                 liveAqi={airData?.us_aqi ?? null}
@@ -909,7 +896,9 @@ export function HomeScreen({
                 onGoToLocationSetup={() => {
                   setActiveTab('coach');
                   window.setTimeout(() => {
-                    document.getElementById('city-search-input')?.focus();
+                    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+                    window.scrollTo({ top: 0, behavior: reduced ? 'auto' : 'smooth' });
+                    document.getElementById('city-search-input')?.focus({ preventScroll: true });
                   }, 60);
                 }}
               />

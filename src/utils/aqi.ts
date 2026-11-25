@@ -1,11 +1,11 @@
-import {
+import type {
   AqiBandInfo,
   HourlyAirQualityPoint,
   MainPollutantInfo,
   PollutantReadings,
   RoleDefinition,
   WorkerRoleId,
-} from '../types/airQuality';
+} from '../types/airQuality.ts';
 
 export const WORKER_ROLES: RoleDefinition[] = [
   {

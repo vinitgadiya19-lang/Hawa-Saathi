@@ -398,7 +398,7 @@ function TripsTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-2xl border-2 border-[#141414]">
+    <div className="overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-2xl border-2 border-[#141414]">
       <table className="w-full text-left border-collapse min-w-[660px] text-sm">
         <thead>
           <tr className="border-b-2 border-[#141414] bg-[#FFF3B0] text-xs font-extrabold uppercase tracking-wide text-[#141414]">

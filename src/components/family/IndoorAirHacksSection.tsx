@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { useState } from 'react';
 import { Check, ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react';
 import { calculateCadrRecommendation, type IndoorHackItem } from '../../services/indoorHacks';
+import { useMemo } from 'react';
 
 interface IndoorAirHacksSectionProps {
   isOpen: boolean;
@@ -219,7 +219,7 @@ function IndoorHackCard({
           </button>
 
           {showCorsiSteps && (
-            <ol className="mt-2 space-y-1.5 text-sm font-semibold text-[#141414] list-decimal pl-5">
+            <ol className="mt-2 space-y-1.5 text-sm font-semibold text-[#141414] list-decimal pl-5 panel-reveal">
               {hack.steps.map((st, idx) => (
                 <li key={idx}>{st}</li>
               ))}
@@ -240,8 +240,6 @@ export function IndoorAirHacksSection({
   checkedHackIds,
   onToggleHack,
 }: IndoorAirHacksSectionProps) {
-  const prefersReducedMotion = useReducedMotion();
-
   return (
     <section
       id="fp-section-3"
@@ -253,7 +251,7 @@ export function IndoorAirHacksSection({
         onClick={onToggleOpen}
         aria-expanded={isOpen}
         aria-controls="fp-indoor-hacks-panel"
-        className="w-full p-5 sm:p-7 flex items-center justify-between gap-4 text-left hover:bg-[#FFFDF2] transition-colors cursor-pointer min-h-[76px]"
+        className="w-full p-5 sm:p-7 flex items-center justify-between gap-4 text-left hover:bg-[#FFFDF2] cursor-pointer min-h-[76px]"
       >
         <div>
           <h2 id="fp-sec3-heading" className="font-serif text-2xl sm:text-3xl font-bold text-[#141414]">
@@ -276,32 +274,24 @@ export function IndoorAirHacksSection({
         </span>
       </button>
 
-      <AnimatePresence initial={false}>
-        {isOpen && (
-          <motion.div
-            id="fp-indoor-hacks-panel"
-            initial={prefersReducedMotion ? { opacity: 1 } : { height: 0, opacity: 0 }}
-            animate={prefersReducedMotion ? { opacity: 1 } : { height: 'auto', opacity: 1 }}
-            exit={prefersReducedMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
-            transition={{ duration: prefersReducedMotion ? 0 : 0.28, ease: 'easeOut' }}
-            className="overflow-hidden"
-          >
-            <div className="px-5 pb-5 sm:px-7 sm:pb-7 pt-2 border-t-2 border-[#141414]/15 space-y-5">
-              <IndoorSafetyRulesBox />
-              <div className="space-y-3">
-                {hacks.map((hack) => (
-                  <IndoorHackCard
-                    key={hack.id}
-                    hack={hack}
-                    isChecked={checkedHackIds.includes(hack.id)}
-                    onToggleHack={onToggleHack}
-                  />
-                ))}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {isOpen && (
+        <div
+          id="fp-indoor-hacks-panel"
+          className="panel-reveal px-5 pb-5 sm:px-7 sm:pb-7 pt-2 border-t-2 border-[#141414]/15 space-y-5"
+        >
+          <IndoorSafetyRulesBox />
+          <div className="space-y-3">
+            {hacks.map((hack) => (
+              <IndoorHackCard
+                key={hack.id}
+                hack={hack}
+                isChecked={checkedHackIds.includes(hack.id)}
+                onToggleHack={onToggleHack}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

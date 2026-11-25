@@ -1,4 +1,4 @@
-import { HourlyAirQualityPoint, WorkerRoleId } from '../types/airQuality';
+import type { HourlyAirQualityPoint, WorkerRoleId } from '../types/airQuality.ts';
 
 export type CoachLanguage = 'en' | 'hi' | 'hinglish';
 
@@ -19,12 +19,45 @@ interface BaseAiContext {
   language: CoachLanguage;
 }
 
+const ADVICE_CLIENT_CACHE_TTL_MS = 5 * 60 * 1000;
+const adviceClientCache = new Map<string, { expiresAt: number; result: AiApiResult }>();
+
+export function buildAdviceCacheKey(params: {
+  role: WorkerRoleId;
+  locationName?: string;
+  aqiBand: string;
+  hoursOutside?: number;
+  language: CoachLanguage;
+}): string {
+  const city = (params.locationName ?? '').trim().toLowerCase();
+  const hours = params.hoursOutside ?? 8;
+  return `${params.role}::${city}::${params.aqiBand}::${hours}::${params.language}`;
+}
+
+export function getCachedAiAdvice(
+  key: string,
+  now = Date.now()
+): AiApiResult | null {
+  const entry = adviceClientCache.get(key);
+  if (!entry) return null;
+  if (now >= entry.expiresAt) {
+    adviceClientCache.delete(key);
+    return null;
+  }
+  return { ...entry.result, cached: true };
+}
+
+export function clearAiAdviceCache(): void {
+  adviceClientCache.clear();
+}
+
 async function postJson<T>(
   url: string,
   payload: unknown,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fetchImpl: typeof fetch = fetch
 ): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetchImpl(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -46,11 +79,23 @@ async function postJson<T>(
   return data;
 }
 
-export function fetchAiAdvice(
+export async function fetchAiAdvice(
   ctx: BaseAiContext,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fetchImpl: typeof fetch = fetch
 ): Promise<AiApiResult> {
-  return postJson<AiApiResult>('/api/advice', ctx, signal);
+  const key = buildAdviceCacheKey(ctx);
+  const cached = getCachedAiAdvice(key);
+  if (cached) {
+    return cached;
+  }
+
+  const result = await postJson<AiApiResult>('/api/advice', ctx, signal, fetchImpl);
+  adviceClientCache.set(key, {
+    expiresAt: Date.now() + ADVICE_CLIENT_CACHE_TTL_MS,
+    result,
+  });
+  return result;
 }
 
 export function fetchAiChat(

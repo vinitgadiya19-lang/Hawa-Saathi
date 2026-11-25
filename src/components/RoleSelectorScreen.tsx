@@ -15,7 +15,7 @@ export function RoleSelectorScreen({
   onContinue,
 }: RoleSelectorScreenProps) {
   return (
-    <div className="min-h-screen flex flex-col justify-between px-4 py-6 sm:px-8 sm:py-10 max-w-5xl mx-auto">
+    <div className="min-h-dvh flex flex-col justify-between px-4 py-6 sm:px-8 sm:py-10 max-w-5xl mx-auto">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-2.5 focus:rounded-xl focus:border-2 focus:border-[#141414] focus:bg-[#FFD23F] focus:text-[#141414] focus:font-extrabold"
@@ -25,7 +25,7 @@ export function RoleSelectorScreen({
 
       <header className="flex items-center justify-between gap-4 pb-6 border-b-2 border-[#141414]">
         <div className="flex items-baseline gap-3">
-          <span className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-[#141414]">
+          <span className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-[#141414] whitespace-nowrap shrink-0">
             Hawa <em className="italic font-semibold">Saathi</em>
           </span>
         </div>
@@ -74,13 +74,13 @@ export function RoleSelectorScreen({
                 onClick={() => onSelectRole(role.id)}
                 aria-pressed={isSelected}
                 aria-label={`Select role: ${role.label}. ${role.tagline}`}
-                className={`brutal-btn text-left rounded-2xl p-5 sm:p-6 flex items-center gap-4 min-h-[104px] cursor-pointer ${role.cardBg} ${
+                className={`brutal-btn text-left rounded-2xl p-5 sm:p-6 flex items-center gap-4 min-h-[112px] cursor-pointer ${role.cardBg} ${
                   isSelected
                     ? 'ring-4 ring-[#141414] ring-offset-2 ring-offset-[#FFFDF2]'
                     : ''
                 }`}
               >
-                <div className="shrink-0 w-16 h-16 rounded-xl bg-[#FFFDF2] border-2 border-[#141414] flex items-center justify-center">
+                <div className="shrink-0 w-16 h-16 aspect-square rounded-xl bg-[#FFFDF2] border-2 border-[#141414] flex items-center justify-center">
                   <RoleIllustration roleId={role.id} className="w-12 h-12" />
                 </div>
 

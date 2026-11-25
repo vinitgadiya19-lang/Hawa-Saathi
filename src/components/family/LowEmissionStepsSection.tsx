@@ -79,7 +79,7 @@ export function LowEmissionStepsSection({
           return (
             <div
               key={`${step.rank}-${step.scenarioId}`}
-              className={`rounded-2xl border-2 border-[#141414] p-4 transition-colors ${
+              className={`rounded-2xl border-2 border-[#141414] p-4 min-h-[104px] ${
                 isChosen ? 'bg-white' : 'bg-[#FFFDF2]/85'
               }`}
             >

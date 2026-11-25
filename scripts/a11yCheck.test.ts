@@ -112,3 +112,56 @@ test('Security hygiene: zero Google API key literals or VITE_GEMINI exposure in 
     }
   }
 });
+
+test('Layout stability audit: dvh units, scrollbar-gutter, body scroll lock, skeletons, and single-axis scroll', () => {
+  const indexCss = fs.readFileSync(path.join(ROOT, 'src/index.css'), 'utf8');
+  const homeTsx = fs.readFileSync(path.join(ROOT, 'src/components/HomeScreen.tsx'), 'utf8');
+  const chatTsx = fs.readFileSync(
+    path.join(ROOT, 'src/components/FloatingChatWidget.tsx'),
+    'utf8'
+  );
+  const indoorTsx = fs.readFileSync(
+    path.join(ROOT, 'src/components/family/IndoorAirHacksSection.tsx'),
+    'utf8'
+  );
+  const chartTsx = fs.readFileSync(
+    path.join(ROOT, 'src/components/HourlyBarChart.tsx'),
+    'utf8'
+  );
+
+  // Zero fragile vh/h-screen units anywhere in src/
+  const srcFiles = collectFiles(path.join(ROOT, 'src'), ['.ts', '.tsx', '.css']);
+  for (const filePath of srcFiles) {
+    const content = fs.readFileSync(filePath, 'utf8');
+    assert.doesNotMatch(
+      content,
+      /\b100vh\b|\b80vh\b|\bh-screen\b|\bmin-h-screen\b/,
+      `Legacy vh/h-screen unit found in ${path.relative(ROOT, filePath)}`
+    );
+  }
+
+  // Global CSS stability guarantees
+  assert.match(indexCss, /min-height:\s*100dvh/);
+  assert.match(indexCss, /scrollbar-gutter:\s*stable/);
+  assert.match(indexCss, /overflow-x:\s*clip/);
+  assert.match(indexCss, /overflow-anchor:\s*auto/);
+  assert.match(indexCss, /scroll-behavior:\s*smooth/);
+  assert.match(indexCss, /@keyframes\s+panelReveal/);
+
+  // Chat widget uses 80dvh, body scroll lock, and container-scoped scrollTo (not outer scrollIntoView)
+  assert.match(chatTsx, /80dvh/);
+  assert.match(chatTsx, /useBodyScrollLock/);
+  assert.doesNotMatch(chatTsx, /scrollIntoView/);
+
+  // Collapsible indoor air hacks uses compositor-only reveal, not height animation
+  assert.doesNotMatch(indoorTsx, /motion\/react/);
+  assert.match(indoorTsx, /panel-reveal/);
+
+  // Loading skeletons reserve space matching loaded sections
+  assert.match(homeTsx, /AirQualityLoadingSkeleton/);
+  assert.match(homeTsx, /FamilyPlanSkeleton/);
+  assert.match(homeTsx, /min-h-dvh/);
+
+  // Horizontal scroll wrappers explicitly lock overflow-y to prevent nested vertical scrollbars
+  assert.match(chartTsx, /overflow-x-auto overflow-y-hidden/);
+});
