@@ -31,6 +31,13 @@ import {
 } from '../utils/aqi';
 import { RoleIllustration, SquiggleUnderline } from './RoleIllustrations';
 import { HourlyBarChart } from './HourlyBarChart';
+import { AiCoachStudio } from './AiCoachStudio';
+import { FormattedCoachReply } from './FormattedCoachReply';
+import {
+  AiApiResult,
+  CoachLanguage,
+  fetchAiAdvice,
+} from '../services/aiCoachApi';
 
 interface HomeScreenProps {
   roleId: WorkerRoleId;
@@ -99,7 +106,32 @@ export function HomeScreen({
   const [isLoadingAir, setIsLoadingAir] = useState(false);
   const [airError, setAirError] = useState<string | null>(null);
 
+  // AI Coach state
+  const [language, setLanguage] = useState<CoachLanguage>(() => {
+    try {
+      const saved = window.localStorage.getItem('hawa_saathi_lang');
+      if (saved === 'en' || saved === 'hi' || saved === 'hinglish') {
+        return saved;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return 'en';
+  });
+  const [adviceResult, setAdviceResult] = useState<AiApiResult | null>(null);
+  const [isLoadingAdvice, setIsLoadingAdvice] = useState(false);
+  const [adviceError, setAdviceError] = useState<string | null>(null);
+  const [answeredByModel, setAnsweredByModel] = useState<string | null>(null);
+  const [hoursOutside, setHoursOutside] = useState<number>(() =>
+    roleId === 'general' ? 2 : 8
+  );
+
+  useEffect(() => {
+    setHoursOutside(roleId === 'general' ? 2 : 8);
+  }, [roleId]);
+
   const abortRef = useRef<AbortController | null>(null);
+  const adviceAbortRef = useRef<AbortController | null>(null);
 
   const loadAirQuality = useCallback(async (loc: SelectedLocation) => {
     abortRef.current?.abort();
@@ -230,6 +262,61 @@ export function HomeScreen({
   const coaching = airData
     ? getRoleCoaching(roleId, airData.us_aqi, mainPollutant, airData.hourly24)
     : null;
+
+  const handleChangeLanguage = (nextLang: CoachLanguage) => {
+    setLanguage(nextLang);
+    try {
+      window.localStorage.setItem('hawa_saathi_lang', nextLang);
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  useEffect(() => {
+    if (!airData || !band || !location) {
+      setAdviceResult(null);
+      setAdviceError(null);
+      return;
+    }
+
+    adviceAbortRef.current?.abort();
+    const controller = new AbortController();
+    adviceAbortRef.current = controller;
+
+    setIsLoadingAdvice(true);
+    setAdviceError(null);
+
+    fetchAiAdvice(
+      {
+        role: roleId,
+        aqiBand: band.label,
+        aqi: airData.us_aqi,
+        hoursOutside,
+        mainPollutant: mainPollutant?.symbol,
+        locationName: location.name,
+        language,
+      },
+      controller.signal
+    )
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setAdviceResult(res);
+        setAnsweredByModel(res.model);
+        setIsLoadingAdvice(false);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setAdviceResult(null);
+        setAdviceError(
+          err instanceof Error ? err.message : 'Unable to load AI advice.'
+        );
+        setIsLoadingAdvice(false);
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [airData, band?.label, location, roleId, language, hoursOutside, mainPollutant?.symbol]);
 
   return (
     <div className="min-h-screen flex flex-col px-4 py-5 sm:px-8 sm:py-8 max-w-5xl mx-auto">
@@ -614,22 +701,53 @@ export function HomeScreen({
                       </div>
                     </div>
 
-                    <ul className="mt-4 space-y-3">
-                      {coaching.tips.map((tip, idx) => (
-                        <li
-                          key={idx}
-                          className="flex items-start gap-3 text-base font-semibold leading-snug"
-                        >
-                          <span
-                            aria-hidden="true"
-                            className="mt-0.5 w-6 h-6 rounded-full bg-[#141414] text-[#FFFDF2] font-mono text-xs font-bold flex items-center justify-center shrink-0"
+                    {isLoadingAdvice && (
+                      <p className="mt-4 text-sm font-bold text-[#3F3F46]">
+                        Personalizing advice for your shift...
+                      </p>
+                    )}
+
+                    {adviceError && !isLoadingAdvice && (
+                      <div
+                        role="alert"
+                        className="mt-4 rounded-xl border-2 border-[#141414] bg-[#FFE0EA] px-3.5 py-2.5 text-sm font-bold text-[#141414]"
+                      >
+                        {adviceError}
+                      </div>
+                    )}
+
+                    {adviceResult && !isLoadingAdvice && (
+                      <div className="mt-4 rounded-2xl border-2 border-[#141414] bg-[#FFFDF2] p-4 space-y-2.5">
+                        {adviceResult.usedFallback && (
+                          <div className="inline-flex items-center rounded-lg border-2 border-[#141414] bg-[#FFD23F] px-2.5 py-1 text-xs font-extrabold text-[#141414]">
+                            Basic answer (AI unavailable)
+                          </div>
+                        )}
+                        <FormattedCoachReply
+                          text={adviceResult.answer}
+                          className="text-sm sm:text-base font-semibold text-[#141414]"
+                        />
+                      </div>
+                    )}
+
+                    {(!adviceResult || adviceResult.usedFallback) && (
+                      <ul className="mt-4 space-y-3">
+                        {coaching.tips.map((tip, idx) => (
+                          <li
+                            key={idx}
+                            className="flex items-start gap-3 text-base font-semibold leading-snug"
                           >
-                            {idx + 1}
-                          </span>
-                          <span>{tip}</span>
-                        </li>
-                      ))}
-                    </ul>
+                            <span
+                              aria-hidden="true"
+                              className="mt-0.5 w-6 h-6 rounded-full bg-[#141414] text-[#FFFDF2] font-mono text-xs font-bold flex items-center justify-center shrink-0"
+                            >
+                              {idx + 1}
+                            </span>
+                            <span>{tip}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
 
                   {coaching.bestWindowText && (
@@ -705,13 +823,35 @@ export function HomeScreen({
 
             {/* 24-Hour Bar Chart */}
             <HourlyBarChart hourly24={airData.hourly24} />
+
+            {/* Interactive AI Coach Studio: Ask Chat, Shift Plan, Photo Audit */}
+            <AiCoachStudio
+              roleId={roleId}
+              aqi={airData.us_aqi}
+              aqiBandLabel={band.label}
+              hoursOutside={hoursOutside}
+              onChangeHoursOutside={setHoursOutside}
+              mainPollutantSymbol={mainPollutant?.symbol}
+              locationName={location.name}
+              hourly24={airData.hourly24}
+              language={language}
+              onChangeLanguage={handleChangeLanguage}
+              onModelAnswered={(model) => setAnsweredByModel(model)}
+            />
           </div>
         )}
       </main>
 
       <footer className="pt-6 pb-2 border-t-2 border-[#141414]/15 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs sm:text-sm font-semibold text-[#3F3F46]">
         <span>Hawa Saathi · Open-Meteo Air Quality &amp; Geocoding</span>
-        <span>modelled estimate, may differ from your exact street</span>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span>modelled estimate, may differ from your exact street</span>
+          {answeredByModel && (
+            <span className="font-mono text-xs font-bold text-[#141414]">
+              Answered by: {answeredByModel}
+            </span>
+          )}
+        </div>
       </footer>
     </div>
   );
