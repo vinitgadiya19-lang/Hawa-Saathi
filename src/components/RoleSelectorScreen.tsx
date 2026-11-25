@@ -1,4 +1,3 @@
-import React from 'react';
 import { ArrowRight, Check } from 'lucide-react';
 import { WorkerRoleId } from '../types/airQuality';
 import { WORKER_ROLES } from '../utils/aqi';
@@ -17,6 +16,13 @@ export function RoleSelectorScreen({
 }: RoleSelectorScreenProps) {
   return (
     <div className="min-h-screen flex flex-col justify-between px-4 py-6 sm:px-8 sm:py-10 max-w-5xl mx-auto">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-2.5 focus:rounded-xl focus:border-2 focus:border-[#141414] focus:bg-[#FFD23F] focus:text-[#141414] focus:font-extrabold"
+      >
+        Skip to main content
+      </a>
+
       <header className="flex items-center justify-between gap-4 pb-6 border-b-2 border-[#141414]">
         <div className="flex items-baseline gap-3">
           <span className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-[#141414]">
@@ -36,7 +42,7 @@ export function RoleSelectorScreen({
         )}
       </header>
 
-      <main className="my-auto py-6 sm:py-10">
+      <main id="main-content" tabIndex={-1} className="my-auto py-6 sm:py-10 focus:outline-none">
         <div className="max-w-2xl mb-8">
           <p className="text-sm sm:text-base font-bold text-[#141414] mb-2">
             Outdoor Air Quality Coach

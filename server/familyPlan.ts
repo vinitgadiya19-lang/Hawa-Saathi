@@ -92,11 +92,71 @@ function sortScenariosForRanking(scenarios: WhatIfScenario[]): WhatIfScenario[] 
   });
 }
 
+function computeAfterExposure(
+  payload: FamilyPlanRequestPayload,
+  steps: RankedLowEmissionStep[]
+): number | null {
+  if (typeof payload.afterExposure === 'number') {
+    return payload.afterExposure;
+  }
+  const totalExp = payload.summary.weeklyTotalExposure;
+  if (totalExp === null) return null;
+  const savedSum = steps.reduce((sum, step) => sum + step.exposureSaved, 0);
+  return Math.max(0, totalExp - Math.round(Math.min(savedSum, totalExp * 0.85)));
+}
+
+function formatSummarySentences(
+  language: FamilyPlanLanguage,
+  currentCo2: number,
+  afterCo2: number,
+  totalExp: number | null,
+  afterExp: number | null,
+  topMemberName: string,
+  topMemberExp: number | null | undefined,
+  firstStep: string
+): string {
+  const hasScores = totalExp !== null && afterExp !== null;
+  const memberScoreNote =
+    topMemberExp !== null && topMemberExp !== undefined ? ` (${topMemberName}: ${topMemberExp})` : '';
+
+  if (language === 'hi') {
+    const expLine = hasScores
+      ? `चुने हुए कदमों से परिवार का साप्ताहिक एक्सपोज़र स्कोर अनुमानित ${totalExp} से घटकर ${afterExp} हो सकता है${memberScoreNote}।`
+      : `${topMemberName} के लिए साफ समय और कम प्रदूषण वाले यात्रा तरीके चुनना सबसे सुरक्षित रहेगा।`;
+    return [
+      `आपके परिवार का अनुमानित साप्ताहिक CO2 उत्सर्जन अभी ${currentCo2} किग्रा है जो इन कदमों के बाद लगभग ${afterCo2} किग्रा हो सकता है।`,
+      expLine,
+      `शुरुआत के लिए सबसे आसान बदलाव "${firstStep}" है।`,
+    ].join(' ');
+  }
+
+  if (language === 'mr') {
+    const expLine = hasScores
+      ? `निवडलेल्या उपायांमुळे कुटुंबाचा साप्ताहिक एक्सपोजर स्कोअर अंदाजे ${totalExp} वरून ${afterExp} पर्यंत कमी होऊ शकतो${memberScoreNote}.`
+      : `${topMemberName} साठी स्वच्छ वेळा आणि कमी प्रदूषणाचे प्रवास मार्ग निवडणे सर्वात उपयुक्त ठरेल.`;
+    return [
+      `तुमच्या कुटुंबाचे अंदाजे साप्ताहिक CO2 उत्सर्जन सध्या ${currentCo2} किलो आहे जे या उपायांनंतर सुमारे ${afterCo2} किलो होऊ शकते.`,
+      expLine,
+      `सुरुवात करण्यासाठी सर्वात सोपा बदल म्हणजे "${firstStep}".`,
+    ].join(' ');
+  }
+
+  const engScoreNote =
+    topMemberExp !== null && topMemberExp !== undefined ? ` (currently ${topMemberExp})` : '';
+  const expSentence = hasScores
+    ? `Following these steps can cut your estimated weekly exposure score from ${totalExp} to ${afterExp}, protecting ${topMemberName}${engScoreNote} first.`
+    : `Prioritizing cleaner travel hours and low-emission modes helps protect ${topMemberName} most.`;
+  return [
+    `Your family's estimated footprint is ${currentCo2} kg CO2 per week, which could drop to about ${afterCo2} kg with these steps.`,
+    expSentence,
+    `Start with "${firstStep}" for an easy, practical win this week.`,
+  ].join(' ');
+}
+
 export function buildRuleBasedFamilyPlan(
   payload: FamilyPlanRequestPayload
 ): Omit<FamilyPlanApiResponse, 'model' | 'usedFallback' | 'cached'> {
   const rankedScenarios = sortScenariosForRanking(payload.summary.scenarios).slice(0, 5);
-
   const steps: RankedLowEmissionStep[] = rankedScenarios.map((sc, idx) => ({
     rank: idx + 1,
     scenarioId: sc.id,
@@ -116,71 +176,21 @@ export function buildRuleBasedFamilyPlan(
       : Math.round(Math.max(0, currentCo2 - Math.min(applicableSaving, currentCo2 * 0.85)) * 10) / 10;
 
   const topMember = payload.summary.memberTotals[0];
-  const topMemberName = topMember?.name || 'your family';
-  const topMemberExp = topMember?.weeklyExposureScore;
-  const totalExp = payload.summary.weeklyTotalExposure;
-  const afterExp =
-    typeof payload.afterExposure === 'number'
-      ? payload.afterExposure
-      : totalExp !== null
-        ? Math.max(
-            0,
-            totalExp -
-              Math.round(
-                Math.min(
-                  steps.reduce((s, st) => s + st.exposureSaved, 0),
-                  totalExp * 0.85
-                )
-              )
-          )
-        : null;
-
+  const afterExp = computeAfterExposure(payload, steps);
   const firstStep = steps[0]?.change ?? 'shifting trips to cleaner hours';
-
-  if (payload.language === 'hi') {
-    const expLine =
-      totalExp !== null && afterExp !== null
-        ? `चुने हुए कदमों से परिवार का साप्ताहिक एक्सपोज़र स्कोर अनुमानित ${totalExp} से घटकर ${afterExp} हो सकता है${topMemberExp !== null && topMemberExp !== undefined ? ` (${topMemberName}: ${topMemberExp})` : ''}।`
-        : `${topMemberName} के लिए साफ समय और कम प्रदूषण वाले यात्रा तरीके चुनना सबसे सुरक्षित रहेगा।`;
-
-    return {
-      steps,
-      summarySentences: [
-        `आपके परिवार का अनुमानित साप्ताहिक CO2 उत्सर्जन अभी ${currentCo2} किग्रा है जो इन कदमों के बाद लगभग ${afterCo2} किग्रा हो सकता है।`,
-        expLine,
-        `शुरुआत के लिए सबसे आसान बदलाव "${firstStep}" है।`,
-      ].join(' '),
-    };
-  }
-
-  if (payload.language === 'mr') {
-    const expLine =
-      totalExp !== null && afterExp !== null
-        ? `निवडलेल्या उपायांमुळे कुटुंबाचा साप्ताहिक एक्सपोजर स्कोअर अंदाजे ${totalExp} वरून ${afterExp} पर्यंत कमी होऊ शकतो${topMemberExp !== null && topMemberExp !== undefined ? ` (${topMemberName}: ${topMemberExp})` : ''}.`
-        : `${topMemberName} साठी स्वच्छ वेळा आणि कमी प्रदूषणाचे प्रवास मार्ग निवडणे सर्वात उपयुक्त ठरेल.`;
-
-    return {
-      steps,
-      summarySentences: [
-        `तुमच्या कुटुंबाचे अंदाजे साप्ताहिक CO2 उत्सर्जन सध्या ${currentCo2} किलो आहे जे या उपायांनंतर सुमारे ${afterCo2} किलो होऊ शकते.`,
-        expLine,
-        `सुरुवात करण्यासाठी सर्वात सोपा बदल म्हणजे "${firstStep}".`,
-      ].join(' '),
-    };
-  }
-
-  const expSentence =
-    totalExp !== null && afterExp !== null
-      ? `Following these steps can cut your estimated weekly exposure score from ${totalExp} to ${afterExp}, protecting ${topMemberName}${topMemberExp !== null && topMemberExp !== undefined ? ` (currently ${topMemberExp})` : ''} first.`
-      : `Prioritizing cleaner travel hours and low-emission modes helps protect ${topMemberName} most.`;
 
   return {
     steps,
-    summarySentences: [
-      `Your family's estimated footprint is ${currentCo2} kg CO2 per week, which could drop to about ${afterCo2} kg with these steps.`,
-      expSentence,
-      `Start with "${firstStep}" for an easy, practical win this week.`,
-    ].join(' '),
+    summarySentences: formatSummarySentences(
+      payload.language,
+      currentCo2,
+      afterCo2,
+      payload.summary.weeklyTotalExposure,
+      afterExp,
+      topMember?.name || 'your family',
+      topMember?.weeklyExposureScore,
+      firstStep
+    ),
   };
 }
 
@@ -196,96 +206,101 @@ function cleanPlainText(raw: unknown, fallback: string, maxLen = 280): string {
   return cleaned || fallback;
 }
 
-export function validateAndGroundGeminiFamilyPlan(
-  rawJsonText: string,
-  payload: FamilyPlanRequestPayload
-): Omit<FamilyPlanApiResponse, 'model' | 'usedFallback' | 'cached'> | null {
-  let parsed: unknown;
+function parseJsonObjectSafe(rawJsonText: string): Record<string, unknown> | null {
   try {
     const stripped = rawJsonText
       .replace(/^```json\s*/i, '')
       .replace(/^```\s*/i, '')
       .replace(/\s*```$/i, '')
       .trim();
-    parsed = JSON.parse(stripped);
+    const parsed = JSON.parse(stripped) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
   } catch {
     return null;
   }
+}
 
-  if (!parsed || typeof parsed !== 'object') return null;
-  const obj = parsed as Record<string, unknown>;
-  if (!Array.isArray(obj.steps) || obj.steps.length === 0) return null;
-
-  const scenarioMap = new Map<string, WhatIfScenario>();
-  for (const sc of payload.summary.scenarios) {
-    scenarioMap.set(sc.id, sc);
+function resolveMatchedScenario(
+  rawId: string,
+  scenarioMap: Map<string, WhatIfScenario>,
+  fallbackSteps: RankedLowEmissionStep[],
+  usedIds: Set<string>
+): WhatIfScenario | undefined {
+  if (rawId && scenarioMap.has(rawId) && !usedIds.has(rawId)) {
+    return scenarioMap.get(rawId);
   }
+  const fallbackCandidate = fallbackSteps.find((fb) => !usedIds.has(fb.scenarioId));
+  return fallbackCandidate ? scenarioMap.get(fallbackCandidate.scenarioId) : undefined;
+}
 
+function groundSingleStep(
+  rawStep: unknown,
+  rank: number,
+  scenarioMap: Map<string, WhatIfScenario>,
+  fallbackSteps: RankedLowEmissionStep[],
+  usedIds: Set<string>
+): RankedLowEmissionStep | null {
+  if (!rawStep || typeof rawStep !== 'object') return null;
+  const item = rawStep as Record<string, unknown>;
+  const rawId = typeof item.scenarioId === 'string' ? item.scenarioId.trim() : '';
+  const matched = resolveMatchedScenario(rawId, scenarioMap, fallbackSteps, usedIds);
+  if (!matched) return null;
+
+  usedIds.add(matched.id);
+  const effortRaw = typeof item.effort === 'string' ? item.effort.toLowerCase().trim() : '';
+  const costRaw = typeof item.cost === 'string' ? item.cost.toLowerCase().trim() : '';
+
+  return {
+    rank,
+    scenarioId: matched.id,
+    change: cleanPlainText(item.change, matched.title, 180),
+    whoBenefits: cleanPlainText(item.whoBenefits, matched.whoBenefits, 100),
+    effort: VALID_EFFORTS.has(effortRaw as ScenarioEffort)
+      ? (effortRaw as ScenarioEffort)
+      : matched.effort,
+    cost: VALID_COSTS.has(costRaw as ScenarioCost) ? (costRaw as ScenarioCost) : matched.cost,
+    // Always snap numeric savings to the deterministic code calculation
+    co2SavedKg: matched.co2SavedKg,
+    exposureSaved: matched.exposureSaved,
+  };
+}
+
+export function validateAndGroundGeminiFamilyPlan(
+  rawJsonText: string,
+  payload: FamilyPlanRequestPayload
+): Omit<FamilyPlanApiResponse, 'model' | 'usedFallback' | 'cached'> | null {
+  const obj = parseJsonObjectSafe(rawJsonText);
+  if (!obj || !Array.isArray(obj.steps) || obj.steps.length === 0) return null;
+
+  const scenarioMap = new Map(payload.summary.scenarios.map((sc) => [sc.id, sc]));
   const fallbackPlan = buildRuleBasedFamilyPlan(payload);
   const usedScenarioIds = new Set<string>();
   const validatedSteps: RankedLowEmissionStep[] = [];
 
-  for (let i = 0; i < Math.min(5, obj.steps.length); i++) {
-    const rawStep = obj.steps[i];
-    if (!rawStep || typeof rawStep !== 'object') continue;
-    const item = rawStep as Record<string, unknown>;
-
-    const rawId = typeof item.scenarioId === 'string' ? item.scenarioId.trim() : '';
-    const matchedScenario =
-      (rawId && scenarioMap.get(rawId)) ||
-      fallbackPlan.steps.find((fb) => !usedScenarioIds.has(fb.scenarioId))
-        ? scenarioMap.get(
-            (rawId && scenarioMap.has(rawId) && !usedScenarioIds.has(rawId)
-              ? rawId
-              : fallbackPlan.steps.find((fb) => !usedScenarioIds.has(fb.scenarioId))
-                  ?.scenarioId) ?? ''
-          )
-        : undefined;
-
-    if (!matchedScenario) continue;
-    usedScenarioIds.add(matchedScenario.id);
-
-    const rawEffort =
-      typeof item.effort === 'string' ? (item.effort.toLowerCase().trim() as ScenarioEffort) : matchedScenario.effort;
-    const rawCost =
-      typeof item.cost === 'string' ? (item.cost.toLowerCase().trim() as ScenarioCost) : matchedScenario.cost;
-
-    validatedSteps.push({
-      rank: validatedSteps.length + 1,
-      scenarioId: matchedScenario.id,
-      change: cleanPlainText(item.change, matchedScenario.title, 180),
-      whoBenefits: cleanPlainText(item.whoBenefits, matchedScenario.whoBenefits, 100),
-      effort: VALID_EFFORTS.has(rawEffort) ? rawEffort : matchedScenario.effort,
-      cost: VALID_COSTS.has(rawCost) ? rawCost : matchedScenario.cost,
-      // Always snap numeric savings to the deterministic code calculation
-      co2SavedKg: matchedScenario.co2SavedKg,
-      exposureSaved: matchedScenario.exposureSaved,
-    });
+  for (const rawStep of obj.steps.slice(0, 5)) {
+    const grounded = groundSingleStep(
+      rawStep,
+      validatedSteps.length + 1,
+      scenarioMap,
+      fallbackPlan.steps,
+      usedScenarioIds
+    );
+    if (grounded) validatedSteps.push(grounded);
   }
 
-  // Top up to 5 steps from deterministic ranking if Gemini returned fewer
   for (const fb of fallbackPlan.steps) {
     if (validatedSteps.length >= 5) break;
     if (!usedScenarioIds.has(fb.scenarioId)) {
       usedScenarioIds.add(fb.scenarioId);
-      validatedSteps.push({
-        ...fb,
-        rank: validatedSteps.length + 1,
-      });
+      validatedSteps.push({ ...fb, rank: validatedSteps.length + 1 });
     }
   }
 
   if (validatedSteps.length === 0) return null;
 
-  const summarySentences = cleanPlainText(
-    obj.summarySentences,
-    fallbackPlan.summarySentences,
-    600
-  );
-
   return {
     steps: validatedSteps,
-    summarySentences,
+    summarySentences: cleanPlainText(obj.summarySentences, fallbackPlan.summarySentences, 600),
   };
 }
 

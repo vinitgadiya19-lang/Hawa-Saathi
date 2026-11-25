@@ -1,5 +1,3 @@
-import React from 'react';
-
 function cleanMarkdownTokens(text: string): string {
   return text
     .replace(/\*\*(.*?)\*\*/g, '$1')

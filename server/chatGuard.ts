@@ -262,6 +262,12 @@ const AIR_QUALITY_RELEVANCE_TERMS: RegExp[] = [
   /(?:हवा|प्रदूषण|धूल|धुआं|मास्क|सांस|ट्रैफिक|डॉक्टर|पानी|सड़क|बाहर|आराम|स्वास्थ्य|अस्थमा|बच्चों|बुजुर्गों|ब्रेक|सवारी|शिफ्ट|हेलमेट)/,
 ];
 
+const SECRET_LEAK_PATTERNS: RegExp[] = [
+  /AIza[0-9A-Za-z_-]{10,}/,
+  /\bGEMINI_API_KEY\b/i,
+  /\bsystem\s+(?:prompt|instruction)\b/i,
+];
+
 export interface PostCheckResult {
   safe: boolean;
   reason?: string;
@@ -270,6 +276,9 @@ export interface PostCheckResult {
 export function scanAnswerPostCheck(answer: string): PostCheckResult {
   if (!answer || !answer.trim()) {
     return { safe: false, reason: 'Empty answer' };
+  }
+  if (SECRET_LEAK_PATTERNS.some((re) => re.test(answer))) {
+    return { safe: false, reason: 'Contains sensitive configuration text' };
   }
   if (CODE_OUTPUT_PATTERNS.some((re) => re.test(answer))) {
     return { safe: false, reason: 'Contains code block or programming syntax' };

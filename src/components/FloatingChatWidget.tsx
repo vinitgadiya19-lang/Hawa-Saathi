@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { AlertTriangle, MessageSquare, Send, X } from 'lucide-react';
 import { CoachLanguage, fetchAiChat } from '../services/aiCoachApi';
 import { WorkerRoleId } from '../types/airQuality';
@@ -51,6 +51,133 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
   );
 }
 
+function useChatFocusTrap(
+  isOpen: boolean,
+  panelRef: RefObject<HTMLDivElement | null>,
+  inputRef: RefObject<HTMLInputElement | null>,
+  launcherRef: RefObject<HTMLButtonElement | null>,
+  onClose: () => void
+) {
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      wasOpenRef.current = true;
+      const frame = requestAnimationFrame(() => inputRef.current?.focus());
+      return () => cancelAnimationFrame(frame);
+    }
+    if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      launcherRef.current?.focus();
+    }
+    return undefined;
+  }, [isOpen, inputRef, launcherRef]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !panelRef.current) return;
+      const focusables = getFocusableElements(panelRef.current);
+      if (focusables.length === 0) return;
+
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+
+      if (!active || !panelRef.current.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose, panelRef]);
+}
+
+function ChatMessageHistory({
+  messages,
+  isLoading,
+  roleLabel,
+  messagesEndRef,
+}: {
+  messages: ChatMessage[];
+  isLoading: boolean;
+  roleLabel: string;
+  messagesEndRef: RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div
+      aria-live="polite"
+      className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-3 bg-[#FFFDF8]"
+    >
+      {messages.length === 0 && (
+        <div className="rounded-2xl border-2 border-[#141414] bg-white p-3.5 text-sm font-semibold text-[#262626]">
+          Ask about air quality, N95 masks, safest work hours, or route tips for {roleLabel}.
+        </div>
+      )}
+
+      {messages.map((msg) =>
+        msg.sender === 'user' ? (
+          <div key={msg.id} className="flex justify-end">
+            <div className="max-w-[85%] rounded-2xl rounded-br-sm border-2 border-[#141414] bg-[#141414] text-[#FFFDF2] px-3.5 py-2.5 text-sm sm:text-base font-semibold break-words">
+              {msg.text}
+            </div>
+          </div>
+        ) : (
+          <div key={msg.id} className="flex justify-start">
+            <div
+              className={`max-w-[92%] rounded-2xl rounded-bl-sm border-2 border-[#141414] px-3.5 py-3 space-y-2 break-words ${
+                msg.isError ? 'bg-[#FFE0EA]' : 'bg-[#FFF3B0]'
+              }`}
+            >
+              {msg.usedFallback && (
+                <div className="inline-flex items-center rounded-lg border-2 border-[#141414] bg-[#FFD23F] px-2.5 py-0.5 text-xs font-extrabold text-[#141414]">
+                  Basic answer (AI unavailable)
+                </div>
+              )}
+
+              {msg.isError ? (
+                <div className="flex items-start gap-2 text-sm font-bold text-[#141414]">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                  <span>{msg.text}</span>
+                </div>
+              ) : (
+                <FormattedCoachReply
+                  text={msg.text}
+                  className="text-sm sm:text-base font-semibold text-[#141414]"
+                />
+              )}
+            </div>
+          </div>
+        )
+      )}
+
+      {isLoading && (
+        <div className="flex justify-start">
+          <div className="rounded-2xl border-2 border-[#141414] bg-[#FFF3B0] px-3.5 py-2.5 text-sm font-bold text-[#141414]">
+            Checking air guidance...
+          </div>
+        </div>
+      )}
+
+      <div ref={messagesEndRef} />
+    </div>
+  );
+}
+
 export function FloatingChatWidget({
   roleId,
   aqi,
@@ -65,76 +192,26 @@ export function FloatingChatWidget({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [question, setQuestion] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [liveAnnouncement, setLiveAnnouncement] = useState('');
 
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const wasOpenRef = useRef(false);
 
   const role = getRoleDefinition(roleId);
 
-  // Move focus into the panel on open, and restore to launcher button on close
-  useEffect(() => {
-    if (isOpen) {
-      wasOpenRef.current = true;
-      const frame = requestAnimationFrame(() => {
-        inputRef.current?.focus();
-      });
-      return () => cancelAnimationFrame(frame);
-    } else if (wasOpenRef.current) {
-      wasOpenRef.current = false;
-      launcherRef.current?.focus();
-    }
-  }, [isOpen]);
+  useChatFocusTrap(isOpen, panelRef, inputRef, launcherRef, () => setIsOpen(false));
 
-  // Scroll to newest message inside the panel
+  // Scroll to newest message inside the panel respecting reduced-motion settings
   useEffect(() => {
     if (isOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      const reduced =
+        typeof window !== 'undefined' &&
+        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      messagesEndRef.current?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth' });
     }
   }, [messages, isLoading, isOpen]);
-
-  // Escape key & strict keyboard focus trap while panel is open
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setIsOpen(false);
-        return;
-      }
-
-      if (e.key === 'Tab' && panelRef.current) {
-        const focusables = getFocusableElements(panelRef.current);
-        if (focusables.length === 0) return;
-
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        const active = document.activeElement as HTMLElement | null;
-
-        if (!active || !panelRef.current.contains(active)) {
-          e.preventDefault();
-          first.focus();
-          return;
-        }
-
-        if (e.shiftKey) {
-          if (active === first) {
-            e.preventDefault();
-            last.focus();
-          }
-        } else if (active === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
 
   const sendQuestion = async (rawText: string) => {
     const trimmed = rawText.trim();
@@ -149,6 +226,7 @@ export function FloatingChatWidget({
     setMessages((prev) => [...prev, userMsg]);
     setQuestion('');
     setIsLoading(true);
+    setLiveAnnouncement('Checking air guidance.');
 
     try {
       const res = await fetchAiChat({
@@ -163,6 +241,7 @@ export function FloatingChatWidget({
       });
 
       onModelAnswered(res.model);
+      setLiveAnnouncement(`Hawa Saathi replied: ${res.answer}`);
       setMessages((prev) => [
         ...prev,
         {
@@ -173,15 +252,15 @@ export function FloatingChatWidget({
         },
       ]);
     } catch (err) {
+      const errorText =
+        err instanceof Error ? err.message : 'Could not get an answer right now.';
+      setLiveAnnouncement(`Chat error: ${errorText}`);
       setMessages((prev) => [
         ...prev,
         {
           id: `e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           sender: 'bot',
-          text:
-            err instanceof Error
-              ? err.message
-              : 'Could not get an answer right now.',
+          text: errorText,
           isError: true,
         },
       ]);
@@ -192,7 +271,6 @@ export function FloatingChatWidget({
 
   return (
     <>
-      {/* Backdrop on mobile bottom sheet */}
       {isOpen && (
         <div
           aria-hidden="true"
@@ -201,7 +279,6 @@ export function FloatingChatWidget({
         />
       )}
 
-      {/* Floating Chat Panel (Mobile 80% bottom sheet / Desktop 380x520 anchored bottom-right) */}
       {isOpen && (
         <div
           ref={panelRef}
@@ -211,7 +288,6 @@ export function FloatingChatWidget({
           aria-labelledby="floating-chat-title"
           className="fixed z-50 inset-x-0 bottom-0 w-full h-[80dvh] max-h-[80vh] sm:inset-x-auto sm:w-[380px] sm:h-[520px] sm:max-h-[calc(100dvh-7rem)] sm:bottom-[calc(max(1rem,env(safe-area-inset-bottom))+72px)] sm:right-[max(1rem,env(safe-area-inset-right))] bg-[#FFFDF2] border-t-2 border-x-2 sm:border-2 border-[#141414] rounded-t-3xl sm:rounded-3xl shadow-[0_-4px_0_#141414] sm:shadow-[4px_4px_0_#141414] flex flex-col overflow-hidden"
         >
-          {/* Panel Header */}
           <div className="shrink-0 bg-[#EAD6FF] border-b-2 border-[#141414] px-4 py-3 flex items-center justify-between gap-2">
             <div className="min-w-0">
               <h2
@@ -236,65 +312,17 @@ export function FloatingChatWidget({
             </button>
           </div>
 
-          {/* Scrollable Message History */}
-          <div
-            aria-live="polite"
-            className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-3 bg-[#FFFDF8]"
-          >
-            {messages.length === 0 && (
-              <div className="rounded-2xl border-2 border-[#141414] bg-white p-3.5 text-sm font-semibold text-[#262626]">
-                Ask about air quality, N95 masks, safest work hours, or route tips for {role.label}.
-              </div>
-            )}
-
-            {messages.map((msg) =>
-              msg.sender === 'user' ? (
-                <div key={msg.id} className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl rounded-br-sm border-2 border-[#141414] bg-[#141414] text-[#FFFDF2] px-3.5 py-2.5 text-sm sm:text-base font-semibold break-words">
-                    {msg.text}
-                  </div>
-                </div>
-              ) : (
-                <div key={msg.id} className="flex justify-start">
-                  <div
-                    className={`max-w-[92%] rounded-2xl rounded-bl-sm border-2 border-[#141414] px-3.5 py-3 space-y-2 break-words ${
-                      msg.isError ? 'bg-[#FFE0EA]' : 'bg-[#FFF3B0]'
-                    }`}
-                  >
-                    {msg.usedFallback && (
-                      <div className="inline-flex items-center rounded-lg border-2 border-[#141414] bg-[#FFD23F] px-2.5 py-0.5 text-xs font-extrabold text-[#141414]">
-                        Basic answer (AI unavailable)
-                      </div>
-                    )}
-
-                    {msg.isError ? (
-                      <div className="flex items-start gap-2 text-sm font-bold text-[#141414]">
-                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
-                        <span>{msg.text}</span>
-                      </div>
-                    ) : (
-                      <FormattedCoachReply
-                        text={msg.text}
-                        className="text-sm sm:text-base font-semibold text-[#141414]"
-                      />
-                    )}
-                  </div>
-                </div>
-              )
-            )}
-
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="rounded-2xl border-2 border-[#141414] bg-[#FFF3B0] px-3.5 py-2.5 text-sm font-bold text-[#141414]">
-                  Checking air guidance...
-                </div>
-              </div>
-            )}
-
-            <div ref={messagesEndRef} />
+          <div className="sr-only" aria-live="polite" aria-atomic="true">
+            {liveAnnouncement}
           </div>
 
-          {/* Suggestion Chips Above Input */}
+          <ChatMessageHistory
+            messages={messages}
+            isLoading={isLoading}
+            roleLabel={role.label}
+            messagesEndRef={messagesEndRef}
+          />
+
           <div
             aria-label="Suggested questions"
             className="shrink-0 border-t-2 border-[#141414]/15 bg-[#FFFDF2] px-3 py-2 flex flex-wrap gap-1.5"
@@ -312,7 +340,6 @@ export function FloatingChatWidget({
             ))}
           </div>
 
-          {/* Pinned Bottom Input */}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -345,7 +372,6 @@ export function FloatingChatWidget({
         </div>
       )}
 
-      {/* Fixed Bottom-Right Floating Button (~60px) */}
       <button
         ref={launcherRef}
         type="button"
