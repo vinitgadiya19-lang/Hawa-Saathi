@@ -102,7 +102,7 @@ export function RoleSelectorScreen({
         </div>
       </main>
 
-      <footer className="pt-6 border-t-2 border-[#141414]/15 text-sm font-medium text-[#3F3F46]">
+      <footer className="pt-6 pb-20 border-t-2 border-[#141414]/15 text-sm font-medium text-[#3F3F46]">
         Live air readings powered by Open-Meteo · Saved locally on your device
       </footer>
     </div>

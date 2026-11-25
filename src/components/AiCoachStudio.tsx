@@ -2,15 +2,12 @@ import React, { useState } from 'react';
 import {
   Camera,
   CalendarClock,
-  MessageSquare,
-  Send,
   Upload,
   AlertTriangle,
 } from 'lucide-react';
 import {
   AiApiResult,
   CoachLanguage,
-  fetchAiChat,
   fetchAiPhotoAudit,
   fetchAiShiftPlan,
   prepareImageForUpload,
@@ -32,25 +29,7 @@ interface AiCoachStudioProps {
   onModelAnswered: (model: string) => void;
 }
 
-type StudioTab = 'chat' | 'shift' | 'photo';
-
-const STARTER_QUESTIONS: Record<CoachLanguage, string[]> = {
-  en: [
-    'Is a cloth mask enough right now?',
-    'What are the safest hours to work today?',
-    'How can I protect my eyes on the road?',
-  ],
-  hi: [
-    'क्या अभी कपड़े का मास्क काफी है?',
-    'आज काम करने का सबसे साफ समय कौन सा है?',
-    'सड़क पर आंखों को धूल से कैसे बचाएं?',
-  ],
-  hinglish: [
-    'Kya abhi kapde ka mask kaafi hai?',
-    'Aaj kaam ke liye sabse saaf time kab hai?',
-    'Road par aankhon ko dhool se kaise bachayein?',
-  ],
-};
+type StudioTab = 'shift' | 'photo';
 
 const SHIFT_OPTIONS = [
   { id: 'Full day outdoor shift', label: 'Full day shift' },
@@ -71,13 +50,7 @@ export function AiCoachStudio({
   onChangeLanguage,
   onModelAnswered,
 }: AiCoachStudioProps) {
-  const [activeTab, setActiveTab] = useState<StudioTab>('chat');
-
-  // Chat state
-  const [question, setQuestion] = useState('');
-  const [chatResult, setChatResult] = useState<AiApiResult | null>(null);
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<StudioTab>('shift');
 
   // Shift plan state
   const [shiftFocus, setShiftFocus] = useState(SHIFT_OPTIONS[0].id);
@@ -104,28 +77,6 @@ export function AiCoachStudio({
     mainPollutant: mainPollutantSymbol,
     locationName,
     language,
-  };
-
-  const askQuestion = async (qText: string) => {
-    const trimmed = qText.trim();
-    if (!trimmed) {
-      setChatError('Type a question first.');
-      return;
-    }
-    setQuestion(trimmed);
-    setChatLoading(true);
-    setChatError(null);
-    try {
-      const res = await fetchAiChat({ ...baseCtx, question: trimmed });
-      setChatResult(res);
-      onModelAnswered(res.model);
-    } catch (err) {
-      setChatError(
-        err instanceof Error ? err.message : 'Could not get an answer right now.'
-      );
-    } finally {
-      setChatLoading(false);
-    }
   };
 
   const handleGenerateShiftPlan = async () => {
@@ -208,7 +159,7 @@ export function AiCoachStudio({
             Saathi Tools
           </h2>
           <p className="text-sm sm:text-base font-semibold text-[#3F3F46]">
-            Ask questions, plan your shift hours, or check your mask photo
+            Plan your shift hours or audit your mask photo
           </p>
         </div>
 
@@ -280,21 +231,8 @@ export function AiCoachStudio({
       <div
         role="tablist"
         aria-label="Hawa Saathi tools"
-        className="grid grid-cols-3 gap-2 sm:gap-3"
+        className="grid grid-cols-2 gap-2.5 sm:gap-3"
       >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'chat'}
-          onClick={() => setActiveTab('chat')}
-          className={`brutal-btn rounded-2xl px-3 py-3 font-extrabold text-sm sm:text-base inline-flex items-center justify-center gap-2 min-h-[50px] cursor-pointer ${
-            activeTab === 'chat' ? 'bg-[#FFD23F]' : 'bg-[#FFFDF2]'
-          }`}
-        >
-          <MessageSquare className="w-5 h-5 shrink-0" aria-hidden="true" />
-          <span>Ask Chat</span>
-        </button>
-
         <button
           type="button"
           role="tab"
@@ -321,70 +259,6 @@ export function AiCoachStudio({
           <span>Photo Audit</span>
         </button>
       </div>
-
-      {/* Tab 1: Ask Chat */}
-      {activeTab === 'chat' && (
-        <div role="tabpanel" aria-label="Ask Chat" className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            {STARTER_QUESTIONS[language].map((q) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => askQuestion(q)}
-                disabled={chatLoading}
-                className="brutal-btn bg-[#FFFDF2] hover:bg-[#EAD6FF] text-left text-sm font-bold text-[#141414] px-3.5 py-2 rounded-xl min-h-[44px] cursor-pointer disabled:opacity-60"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              askQuestion(question);
-            }}
-            className="flex flex-col sm:flex-row gap-2.5"
-          >
-            <div className="flex-1">
-              <label htmlFor="chat-question-input" className="sr-only">
-                Ask an air quality question
-              </label>
-              <input
-                id="chat-question-input"
-                type="text"
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                placeholder="Ask anything about masks, routes, or symptoms..."
-                className="w-full min-h-[52px] px-4 py-3 text-base font-semibold text-[#141414] placeholder:text-[#52525B] bg-[#FFFDF2] border-2 border-[#141414] rounded-2xl"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={chatLoading}
-              aria-label="Send question to Hawa Saathi"
-              className="brutal-btn bg-[#FF4D8D] text-[#141414] font-extrabold text-base px-5 py-3 rounded-2xl inline-flex items-center justify-center gap-2 min-h-[52px] whitespace-nowrap cursor-pointer disabled:opacity-65"
-            >
-              <Send className="w-5 h-5 shrink-0" aria-hidden="true" />
-              <span>{chatLoading ? 'Asking...' : 'Ask'}</span>
-            </button>
-          </form>
-
-          {chatError && (
-            <div
-              role="alert"
-              className="rounded-xl border-2 border-[#141414] bg-[#FFE0EA] p-3.5 text-sm sm:text-base font-bold text-[#141414] flex items-center gap-2"
-            >
-              <AlertTriangle className="w-5 h-5 shrink-0" aria-hidden="true" />
-              <span>{chatError}</span>
-            </div>
-          )}
-
-          {chatResult && (
-            <ResultCard result={chatResult} bgClass="bg-[#FFF3B0]" />
-          )}
-        </div>
-      )}
 
       {/* Tab 2: Shift Plan */}
       {activeTab === 'shift' && (

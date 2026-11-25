@@ -39,9 +39,23 @@ import {
   fetchAiAdvice,
 } from '../services/aiCoachApi';
 
+export interface LiveChatAirContext {
+  aqi?: number;
+  aqiBandLabel: string;
+  mainPollutantSymbol?: string;
+  locationName?: string;
+}
+
 interface HomeScreenProps {
   roleId: WorkerRoleId;
   location: SelectedLocation | null;
+  language: CoachLanguage;
+  onChangeLanguage: (lang: CoachLanguage) => void;
+  hoursOutside: number;
+  onChangeHoursOutside: (hours: number) => void;
+  answeredByModel: string | null;
+  onModelAnswered: (model: string) => void;
+  onLiveAirContextChange: (ctx: LiveChatAirContext) => void;
   onSelectLocation: (loc: SelectedLocation) => void;
   onChangeRole: () => void;
 }
@@ -85,6 +99,13 @@ function BandIcon({ level, className = 'w-6 h-6' }: { level: AqiBandLevel; class
 export function HomeScreen({
   roleId,
   location,
+  language,
+  onChangeLanguage,
+  hoursOutside,
+  onChangeHoursOutside,
+  answeredByModel,
+  onModelAnswered,
+  onLiveAirContextChange,
   onSelectLocation,
   onChangeRole,
 }: HomeScreenProps) {
@@ -107,28 +128,9 @@ export function HomeScreen({
   const [airError, setAirError] = useState<string | null>(null);
 
   // AI Coach state
-  const [language, setLanguage] = useState<CoachLanguage>(() => {
-    try {
-      const saved = window.localStorage.getItem('hawa_saathi_lang');
-      if (saved === 'en' || saved === 'hi' || saved === 'hinglish') {
-        return saved;
-      }
-    } catch {
-      // ignore storage errors
-    }
-    return 'en';
-  });
   const [adviceResult, setAdviceResult] = useState<AiApiResult | null>(null);
   const [isLoadingAdvice, setIsLoadingAdvice] = useState(false);
   const [adviceError, setAdviceError] = useState<string | null>(null);
-  const [answeredByModel, setAnsweredByModel] = useState<string | null>(null);
-  const [hoursOutside, setHoursOutside] = useState<number>(() =>
-    roleId === 'general' ? 2 : 8
-  );
-
-  useEffect(() => {
-    setHoursOutside(roleId === 'general' ? 2 : 8);
-  }, [roleId]);
 
   const abortRef = useRef<AbortController | null>(null);
   const adviceAbortRef = useRef<AbortController | null>(null);
@@ -263,14 +265,20 @@ export function HomeScreen({
     ? getRoleCoaching(roleId, airData.us_aqi, mainPollutant, airData.hourly24)
     : null;
 
-  const handleChangeLanguage = (nextLang: CoachLanguage) => {
-    setLanguage(nextLang);
-    try {
-      window.localStorage.setItem('hawa_saathi_lang', nextLang);
-    } catch {
-      // ignore storage errors
-    }
-  };
+  useEffect(() => {
+    onLiveAirContextChange({
+      aqi: airData?.us_aqi,
+      aqiBandLabel: band?.label ?? 'Moderate',
+      mainPollutantSymbol: mainPollutant?.symbol,
+      locationName: location?.name,
+    });
+  }, [
+    airData?.us_aqi,
+    band?.label,
+    mainPollutant?.symbol,
+    location?.name,
+    onLiveAirContextChange,
+  ]);
 
   useEffect(() => {
     if (!airData || !band || !location) {
@@ -301,7 +309,7 @@ export function HomeScreen({
       .then((res) => {
         if (controller.signal.aborted) return;
         setAdviceResult(res);
-        setAnsweredByModel(res.model);
+        onModelAnswered(res.model);
         setIsLoadingAdvice(false);
       })
       .catch((err) => {
@@ -824,25 +832,25 @@ export function HomeScreen({
             {/* 24-Hour Bar Chart */}
             <HourlyBarChart hourly24={airData.hourly24} />
 
-            {/* Interactive AI Coach Studio: Ask Chat, Shift Plan, Photo Audit */}
+            {/* Interactive AI Coach Studio: Shift Plan & Photo Audit */}
             <AiCoachStudio
               roleId={roleId}
               aqi={airData.us_aqi}
               aqiBandLabel={band.label}
               hoursOutside={hoursOutside}
-              onChangeHoursOutside={setHoursOutside}
+              onChangeHoursOutside={onChangeHoursOutside}
               mainPollutantSymbol={mainPollutant?.symbol}
               locationName={location.name}
               hourly24={airData.hourly24}
               language={language}
-              onChangeLanguage={handleChangeLanguage}
-              onModelAnswered={(model) => setAnsweredByModel(model)}
+              onChangeLanguage={onChangeLanguage}
+              onModelAnswered={onModelAnswered}
             />
           </div>
         )}
       </main>
 
-      <footer className="pt-6 pb-2 border-t-2 border-[#141414]/15 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs sm:text-sm font-semibold text-[#3F3F46]">
+      <footer className="pt-6 pb-20 border-t-2 border-[#141414]/15 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs sm:text-sm font-semibold text-[#3F3F46]">
         <span>Hawa Saathi · Open-Meteo Air Quality &amp; Geocoding</span>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span>modelled estimate, may differ from your exact street</span>

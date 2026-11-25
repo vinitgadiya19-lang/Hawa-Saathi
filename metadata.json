@@ -1,6 +1,10 @@
 {
   "name": "Hawa Saathi",
   "description": "Outdoor air quality coach for delivery riders, cab/auto drivers, street vendors, traffic police, and citizens using live Open-Meteo data.",
-  "requestFramePermissions": ["geolocation"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
